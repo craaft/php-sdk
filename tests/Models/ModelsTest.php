@@ -10,12 +10,13 @@ use Craaft\Enums\Visibility;
 use Craaft\Enums\WorkspaceRole;
 use Craaft\Models\Card;
 use Craaft\Models\CardSummary;
+use Craaft\Models\ChecklistItem;
 use Craaft\Models\Column;
 use Craaft\Models\Comment;
+use Craaft\Models\Milestone;
 use Craaft\Models\Project;
 use Craaft\Models\User;
 use DateTimeImmutable;
-use DateTimeZone;
 use PHPUnit\Framework\TestCase;
 
 final class ModelsTest extends TestCase
@@ -70,6 +71,8 @@ final class ModelsTest extends TestCase
             'updatedBy' => 'u1',
             'updatedByName' => 'Alice',
             'attachmentCount' => 3,
+            'checklistDone' => 2,
+            'checklistTotal' => 5,
             'tags' => ['api', 'sdk'],
             'createdAt' => '2026-05-08T10:00:00Z',
             'updatedAt' => '2026-05-08T11:00:00+00:00',
@@ -77,6 +80,8 @@ final class ModelsTest extends TestCase
         $this->assertSame('u2', $c->assignedUserId);
         $this->assertSame(3, $c->size);
         $this->assertSame(Priority::High, $c->priority);
+        $this->assertSame(2, $c->checklistDone);
+        $this->assertSame(5, $c->checklistTotal);
         $this->assertSame(['api', 'sdk'], $c->tags);
         $this->assertEquals(
             new DateTimeImmutable('2026-06-01T00:00:00+00:00'),
@@ -98,6 +103,9 @@ final class ModelsTest extends TestCase
             'updatedAt' => '2026-05-08T10:00:00Z',
         ]);
         $this->assertSame('u2', $c->assignedUserId);
+        // Checklist counters default to 0 when absent from the payload.
+        $this->assertSame(0, $c->checklistDone);
+        $this->assertSame(0, $c->checklistTotal);
     }
 
     public function testCardSummaryFromSearchShape(): void
@@ -128,6 +136,57 @@ final class ModelsTest extends TestCase
             'updatedAt' => '2026-05-08T10:00:00Z',
         ]);
         $this->assertSame('hi', $c->body);
+    }
+
+    public function testChecklistItemFromApi(): void
+    {
+        $i = ChecklistItem::fromApi([
+            'id' => 'ck1',
+            'cardId' => 'card1',
+            'text' => 'write tests',
+            'done' => true,
+            'position' => 2.5,
+            'createdAt' => '2026-05-08T10:00:00Z',
+            'updatedAt' => '2026-05-08T11:00:00Z',
+        ]);
+        $this->assertSame('ck1', $i->id);
+        $this->assertSame('card1', $i->cardId);
+        $this->assertSame('write tests', $i->text);
+        $this->assertTrue($i->done);
+        $this->assertSame(2.5, $i->position);
+    }
+
+    public function testMilestoneFromApiUnachieved(): void
+    {
+        $m = Milestone::fromApi([
+            'id' => 'm1',
+            'projectId' => 'p1',
+            'name' => 'Beta launch',
+            'dueOn' => '2026-08-01',
+            'achievedAt' => null,
+            'createdAt' => '2026-05-08T10:00:00Z',
+            'updatedAt' => '2026-05-08T10:00:00Z',
+        ]);
+        $this->assertSame('Beta launch', $m->name);
+        $this->assertSame('2026-08-01', $m->dueOn);
+        $this->assertNull($m->achievedAt);
+    }
+
+    public function testMilestoneFromApiAchieved(): void
+    {
+        $m = Milestone::fromApi([
+            'id' => 'm1',
+            'projectId' => 'p1',
+            'name' => 'Beta launch',
+            'dueOn' => '2026-08-01',
+            'achievedAt' => '2026-07-18T09:00:00Z',
+            'createdAt' => '2026-05-08T10:00:00Z',
+            'updatedAt' => '2026-07-18T09:00:00Z',
+        ]);
+        $this->assertEquals(
+            new DateTimeImmutable('2026-07-18T09:00:00+00:00'),
+            $m->achievedAt,
+        );
     }
 
     public function testProjectFromApiWithColumns(): void

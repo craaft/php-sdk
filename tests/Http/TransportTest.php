@@ -28,7 +28,9 @@ final class TransportTest extends TestCase
         $stub = $http ?? new StubExecutor();
         $sleeps = new \stdClass();
         $sleeps->values = [];
-        $sleeper ??= static function (int $us) use ($sleeps): void { $sleeps->values[] = $us / 1_000_000.0; };
+        $sleeper ??= static function (int $us) use ($sleeps): void {
+            $sleeps->values[] = $us / 1_000_000.0;
+        };
         $retry ??= new RetryConfig(maxAttempts: 1);
         $t = new Transport(
             apiKey: 'cra_test',
@@ -38,7 +40,7 @@ final class TransportTest extends TestCase
             userAgent: 'craaft-php/test',
             http: $stub,
             sleeper: $sleeper,
-            jitterFn: static fn (float $a): float => 0.0,
+            jitterFn: static fn(float $a): float => 0.0,
         );
         return [$t, $stub, $sleeps];
     }

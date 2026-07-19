@@ -7,15 +7,17 @@ namespace Craaft\Models;
 use Craaft\Util\Dates;
 use DateTimeImmutable;
 
-readonly class ProjectExportProject
+readonly class Milestone
 {
     public function __construct(
         public string $id,
+        public string $projectId,
         public string $name,
-        public bool $isFavorite,
+        /** Plain calendar date in `YYYY-MM-DD` form (no time component). */
+        public string $dueOn,
+        public ?DateTimeImmutable $achievedAt,
         public DateTimeImmutable $createdAt,
         public DateTimeImmutable $updatedAt,
-        public ?string $description = null,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -23,11 +25,12 @@ readonly class ProjectExportProject
     {
         return new self(
             id: (string) $data['id'],
+            projectId: (string) $data['projectId'],
             name: (string) $data['name'],
-            isFavorite: (bool) ($data['isFavorite'] ?? false),
+            dueOn: (string) $data['dueOn'],
+            achievedAt: Dates::parse($data['achievedAt'] ?? null),
             createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
             updatedAt: Dates::parse((string) $data['updatedAt']) ?? throw new \InvalidArgumentException('missing updatedAt'),
-            description: ($data['description'] ?? null) === null ? null : (string) $data['description'],
         );
     }
 }

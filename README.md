@@ -10,7 +10,7 @@ hierarchy. Mirrors the feature set of the official Python SDK.
 composer require craaft/craaft
 ```
 
-PHP 8.2 or newer. Only `ext-curl`, `ext-json`, and `ext-mbstring` are required — no
+PHP 8.2 or newer. Only `ext-curl`, `ext-json`, and `ext-mbstring` are required - no
  Guzzle, no PSR-18, nothing else to install.
 
 ## Quickstart
@@ -76,21 +76,56 @@ development — anything else must be `https://` to avoid leaking the bearer tok
 | Sub-client           | Methods |
 |----------------------|---------|
 | `$client->me`        | `get()`, `update(name:, email:, username:)` |
-| `$client->projects`  | `list()`, `get($id)`, `create($name, $description)`, `update($id, ...)`, `delete($id)`, `export($id)`, `listTags($id)`, `enableShare($id)`, `disableShare($id)`, `listCards($id)`, `createCard($id, ...)`, `addColumn($id, $title)`, `listMembers($id)`, `addMember($id, $userId, $role)`, `updateMember($id, $userId, $role)`, `removeMember($id, $userId)` |
-| `$client->cards`     | `update($id, ...)`, `delete($id)`, `move($id, $targetProjectId, $column)`, `upcoming()`, `focus()`, `hygiene($type)`, `listEvents($id)`, `search($q, $limit=20)`, `listComments($id)`, `addComment($id, $body)` |
+| `$client->projects`  | `list()`, `get($id)`, `create($name, $description)`, `update($id, ...)`, `delete($id)`, `export($id)`, `listTags($id)`, `enableShare($id)`, `disableShare($id)`, `listCards($id)`, `createCard($id, ...)`, `createCards($id, $cards)`, `addColumn($id, $title)`, `listMilestones($id)`, `addMilestone($id, $name, $dueOn)`, `listMembers($id)`, `addMember($id, $userId, $role)`, `updateMember($id, $userId, $role)`, `removeMember($id, $userId)` |
+| `$client->cards`     | `update($id, ...)`, `bulkUpdate($cards)`, `bulkMove($ids, $column, $targetProjectId)`, `delete($id)`, `move($id, $targetProjectId, $column)`, `upcoming()`, `focus()`, `hygiene($type)`, `listEvents($id)`, `search($q, $limit=20)`, `listComments($id)`, `addComment($id, $body)`, `listChecklist($id)`, `addChecklistItem($id, $text)` |
 | `$client->attachments` | `listForCard($cardId)`, `upload($cardId, $file, $filename, $contentType)`, `download($attachmentId)`, `delete($attachmentId)` |
 | `$client->comments`  | `update($id, $body)`, `delete($id)` |
+| `$client->checklist` | `update($id, text:, done:)`, `delete($id)` |
 | `$client->columns`   | `update($id, ...)`, `delete($id)`, `archive($id)` |
+| `$client->milestones` | `update($id, name:, dueOn:, achieved:)`, `delete($id)` |
 | `$client->members`   | `list()`, `listInvitations()`, `createInvitation($email, $role, $boardGrants)` |
 
-`upcoming()` and `search()` return `array<CardSummary>` — lightweight previews.
+`upcoming()` and `search()` return `array<CardSummary>` - lightweight previews.
 `focus()` returns a `FocusResponse` with `due`, `attention`, and `hygiene` buckets.
+
+## Bulk operations
+
+Three endpoints batch up to 100 cards into one all-or-nothing transaction.
+One invalid item rolls back the whole batch and the server's `ValidationError`
+names the offending index (`cards[3]: title is required`). Bulk requests never
+send notification emails.
+
+```php
+// Bulk create: title + column required per item; position omitted = append.
+// Unlike createCard(), the assignee is NOT defaulted to the caller.
+$cards = $client->projects->createCards($project->id, [
+    ['title' => 'Ship it', 'column' => 'todo'],
+    ['title' => 'Review copy', 'column' => 'doing', 'priority' => Priority::High,
+     'dueDate' => new DateTimeImmutable('+3 days'), 'tags' => ['launch']],
+]);
+
+// Bulk update: items are passed through verbatim, so all three field states
+// work - a present key is applied, `'dueDate' => null` clears the field, and
+// an absent key leaves it alone. (The single-card update() treats null args
+// as "omit", so use bulkUpdate() when you need to clear a field.)
+$client->cards->bulkUpdate([
+    ['id' => $a->id, 'title' => 'Renamed', 'priority' => Priority::Urgent],
+    ['id' => $b->id, 'dueDate' => null],
+]);
+
+// Bulk move: same board by default; pass targetProjectId to change boards.
+$client->cards->bulkMove([$a->id, $b->id], column: 'done');
+```
+
+DateTimeInterface values and `Priority` enums inside bulk items are serialized
+for you; everything else is sent as-is.
 
 ## Models
 
 Readonly value objects, one class per schema. Highlights:
 
 - `User`, `Project`, `Column`, `Card`, `Comment`, `Attachment`
+- `ChecklistItem`, `Milestone`
 - `CardSummary`, `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
 - `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation`
 - `ProjectExport` (+ nested export types)
@@ -101,8 +136,15 @@ Finite string fields are backed enums: `Priority` (`low`/`medium`/`high`/`urgent
 server resolve to `null` (forward-compatible).
 
 `Card->size` is an optional **integer** estimate. Set metadata via `cards->update()`
-after `createCard()` — the create endpoint only accepts `title`, `column`,
-`position`, and optional `description`.
+after `createCard()` - the create endpoint only accepts `title`, `column`,
+`position`, and optional `description`. (Bulk `createCards()` accepts the full
+metadata set per item.)
+
+`Milestone->dueOn` is a plain `YYYY-MM-DD` string (no time component);
+`Milestone->achievedAt` is a nullable `DateTimeImmutable`. Any board member may
+read milestones, but writes are board-admin only - non-admin members get a
+`PermissionError` (403). Checklist items may be added, edited, and deleted by
+any board member.
 
 `attachments->upload()` sends multipart form data (max **25 MiB** per file) and
 requires a Pro/Team workspace; check `Project->canUploadAttachments` first. It

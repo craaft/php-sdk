@@ -38,6 +38,21 @@ final class Dates
         return $iso;
     }
 
+    /**
+     * Serialize a value for an API plain-date field (`YYYY-MM-DD`).
+     *
+     * Strings pass through unchanged so callers can format themselves.
+     * DateTimeInterface values are formatted as the calendar date in
+     * their own timezone.
+     */
+    public static function serializeDate(DateTimeInterface|string $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+        return $value->format('Y-m-d');
+    }
+
     public static function parse(?string $value): ?DateTimeImmutable
     {
         if ($value === null || $value === '') {

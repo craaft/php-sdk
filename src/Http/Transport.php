@@ -55,7 +55,7 @@ final class Transport
     ) {
         $this->baseUrl = rtrim($baseUrl, '/');
         $this->maxResponseBytes = $maxResponseBytes;
-        $this->sleeper = $sleeper ?? static fn (int $us): int => usleep($us) ?? 0;
+        $this->sleeper = $sleeper ?? static fn(int $us): int => usleep($us) ?? 0;
         $this->jitterFn = $jitterFn ?? static function (float $amount): float {
             if ($amount <= 0.0) {
                 return 0.0;
@@ -110,7 +110,7 @@ final class Transport
         for ($attempt = 0; $attempt < $attempts; ++$attempt) {
             try {
                 $result = $http->execute($method, $url, $curlHeaders, $payload, $this->timeout, $bodyLimit);
-            } catch (Exceptions\TimeoutError | Exceptions\ConnectionError $e) {
+            } catch (Exceptions\TimeoutError|Exceptions\ConnectionError $e) {
                 $this->log[] = "network error on {$method} {$path} attempt {$attempt}: {$e->getMessage()}";
                 if (!$this->shouldRetry($method, $attempt, null, true)) {
                     throw $e;

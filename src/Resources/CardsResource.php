@@ -10,8 +10,10 @@ use Craaft\Models\AttentionCard;
 use Craaft\Models\Card;
 use Craaft\Models\CardEvent;
 use Craaft\Models\CardSummary;
+use Craaft\Models\ChecklistItem;
 use Craaft\Models\Comment;
 use Craaft\Models\FocusResponse;
+use Craaft\Util\BulkCards;
 use Craaft\Util\Dates;
 use Craaft\Util\Id;
 use DateTimeInterface;
@@ -63,6 +65,60 @@ final class CardsResource extends BaseResource
         }
         $data = $this->transport->request('PATCH', '/cards/' . Id::segment($cardId), null, $body);
         return Card::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Apply up to 100 partial card updates in one transaction.
+     *
+     * Each item is an associative array of `['id' => ...]` plus any
+     * fields the single-card update accepts: `title`, `description`,
+     * `column`, `position`, `dueDate`, `assignedUserId`, `size`,
+     * `priority`, and `tags`. Unlike `update()`, items are passed
+     * through verbatim so all three field states are expressible: a
+     * present key is applied, a key set to null clears a nullable field
+     * (dueDate / assignedUserId / size / priority), and an absent key
+     * leaves the field alone. DateTimeInterface values and Priority
+     * enums are serialized for you.
+     *
+     * All-or-nothing: one invalid item rolls back the whole batch and
+     * the server's ValidationError names the offending index
+     * (`cards[3]: title is required`). Bulk requests never send
+     * notification emails.
+     *
+     * @param list<array<string, mixed>> $cards
+     * @return list<Card> Updated cards, in request order
+     */
+    public function bulkUpdate(array $cards): array
+    {
+        $body = ['cards' => BulkCards::normalize($cards)];
+        $data = $this->transport->request('PATCH', '/cards/bulk', null, $body);
+        $rows = $this->ensureArray($data)['cards'] ?? [];
+        return array_map([Card::class, 'fromApi'], is_array($rows) ? $rows : []);
+    }
+
+    /**
+     * Move up to 100 cards to a column in one transaction.
+     *
+     * Without `$targetProjectId`, sweeps the cards to `$column` on their
+     * own board - every id must belong to the same board (400
+     * otherwise). With `$targetProjectId`, moves the batch to that board
+     * instead (same workspace only; 404 otherwise; 422 when the column
+     * does not exist there). Moved cards append to the end of the target
+     * column in request order. All-or-nothing; no notification emails.
+     *
+     * @param list<string> $ids
+     * @return list<Card> Moved cards, in request order
+     */
+    public function bulkMove(array $ids, string $column, ?string $targetProjectId = null): array
+    {
+        BulkCards::assertCount(count($ids));
+        $body = ['ids' => array_values($ids), 'column' => $column];
+        if ($targetProjectId !== null) {
+            $body['targetProjectId'] = $targetProjectId;
+        }
+        $data = $this->transport->request('POST', '/cards/bulk/move', null, $body);
+        $rows = $this->ensureArray($data)['cards'] ?? [];
+        return array_map([Card::class, 'fromApi'], is_array($rows) ? $rows : []);
     }
 
     public function delete(string $cardId): void
@@ -126,6 +182,20 @@ final class CardsResource extends BaseResource
     {
         $data = $this->transport->request('POST', '/cards/' . Id::segment($cardId) . '/comments', null, ['body' => $body]);
         return Comment::fromApi($this->ensureArray($data));
+    }
+
+    /** @return list<ChecklistItem> */
+    public function listChecklist(string $cardId): array
+    {
+        $data = $this->transport->request('GET', '/cards/' . Id::segment($cardId) . '/checklist');
+        return array_map([ChecklistItem::class, 'fromApi'], is_array($data) ? $data : []);
+    }
+
+    /** Add a checklist item (max 1000 chars); it is appended to the end. */
+    public function addChecklistItem(string $cardId, string $text): ChecklistItem
+    {
+        $data = $this->transport->request('POST', '/cards/' . Id::segment($cardId) . '/checklist', null, ['text' => $text]);
+        return ChecklistItem::fromApi($this->ensureArray($data));
     }
 
     private function ensureArray(mixed $data): array

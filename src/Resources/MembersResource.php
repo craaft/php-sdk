@@ -41,7 +41,7 @@ final class MembersResource extends BaseResource
         $body = ['email' => $email, 'role' => $role];
         if ($boardGrants !== null) {
             $body['boardGrants'] = array_map(
-                static fn (array $g) => ['projectId' => $g['projectId'], 'role' => $g['role']->value],
+                static fn(array $g) => ['projectId' => $g['projectId'], 'role' => $g['role']->value],
                 $boardGrants,
             );
         }

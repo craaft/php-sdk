@@ -6,8 +6,8 @@ namespace Craaft\Tests\Resources;
 
 use Craaft\Enums\BoardRole;
 use Craaft\Enums\Visibility;
-use Craaft\Tests\ClientBuilder;
 use Craaft\Http\HttpAttempt;
+use Craaft\Tests\ClientBuilder;
 use PHPUnit\Framework\TestCase;
 
 final class ProjectsTest extends TestCase
@@ -134,6 +134,113 @@ final class ProjectsTest extends TestCase
             ['title' => 'x', 'column' => 'todo', 'position' => 1.0],
             json_decode($b->stub()->lastCall()['body'], true),
         );
+    }
+
+    private function cardRow(): array
+    {
+        return [
+            'id' => 'card1', 'projectId' => 'p1', 'column' => 'todo', 'title' => 'x',
+            'position' => 1.0, 'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+            'attachmentCount' => 0, 'tags' => [],
+        ];
+    }
+
+    public function testCreateCardsBulk(): void
+    {
+        $b = new ClientBuilder();
+        $second = array_merge($this->cardRow(), ['id' => 'card2', 'title' => 'y', 'column' => 'doing']);
+        $b->stub()->enqueueJson(201, ['cards' => [$this->cardRow(), $second]]);
+        $cards = $b->client()->projects->createCards('p1', [
+            ['title' => 'x', 'column' => 'todo'],
+            ['title' => 'y', 'column' => 'doing', 'position' => 2.5, 'priority' => \Craaft\Enums\Priority::High,
+                'dueDate' => new \DateTimeImmutable('2026-08-01T12:00:00', new \DateTimeZone('UTC')),
+                'tags' => ['launch']],
+        ]);
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/projects/p1/cards/bulk', $call['url']);
+        $this->assertSame(
+            ['cards' => [
+                ['title' => 'x', 'column' => 'todo'],
+                ['title' => 'y', 'column' => 'doing', 'position' => 2.5, 'priority' => 'high',
+                    'dueDate' => '2026-08-01T12:00:00+00:00', 'tags' => ['launch']],
+            ]],
+            json_decode($call['body'], true),
+        );
+        $this->assertCount(2, $cards);
+        $this->assertSame('card1', $cards[0]->id);
+        $this->assertSame('card2', $cards[1]->id);
+    }
+
+    public function testCreateCardsRejectsEmptyBatch(): void
+    {
+        $c = (new ClientBuilder())->client();
+        $this->expectException(\InvalidArgumentException::class);
+        $c->projects->createCards('p1', []);
+    }
+
+    public function testCreateCardsRejectsOversizedBatch(): void
+    {
+        $c = (new ClientBuilder())->client();
+        $this->expectException(\InvalidArgumentException::class);
+        $c->projects->createCards('p1', array_fill(0, 101, ['title' => 'x', 'column' => 'todo']));
+    }
+
+    public function testCreateCards400NamesOffendingIndex(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(400, ['error' => 'cards[3]: title is required']);
+        $this->expectException(\Craaft\Exceptions\ValidationError::class);
+        $this->expectExceptionMessage('cards[3]: title is required');
+        $b->client()->projects->createCards('p1', [['column' => 'todo']]);
+    }
+
+    public function testListMilestones(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [[
+            'id' => 'm1', 'projectId' => 'p1', 'name' => 'Beta launch', 'dueOn' => '2026-08-01',
+            'achievedAt' => null, 'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+        ]]);
+        $milestones = $b->client()->projects->listMilestones('p1');
+        $this->assertSame(self::BASE . '/projects/p1/milestones', $b->stub()->lastCall()['url']);
+        $this->assertSame('Beta launch', $milestones[0]->name);
+        $this->assertSame('2026-08-01', $milestones[0]->dueOn);
+        $this->assertNull($milestones[0]->achievedAt);
+    }
+
+    public function testAddMilestone(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, [
+            'id' => 'm1', 'projectId' => 'p1', 'name' => 'Beta launch', 'dueOn' => '2026-08-01',
+            'achievedAt' => null, 'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+        ]);
+        $m = $b->client()->projects->addMilestone('p1', name: 'Beta launch', dueOn: '2026-08-01');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/projects/p1/milestones', $call['url']);
+        $this->assertSame(
+            ['name' => 'Beta launch', 'dueOn' => '2026-08-01'],
+            json_decode($call['body'], true),
+        );
+        $this->assertSame('m1', $m->id);
+    }
+
+    public function testAddMilestoneSerializesDatetimeDueOn(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, [
+            'id' => 'm1', 'projectId' => 'p1', 'name' => 'Beta launch', 'dueOn' => '2026-08-01',
+            'achievedAt' => null, 'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+        ]);
+        $b->client()->projects->addMilestone(
+            'p1',
+            name: 'Beta launch',
+            dueOn: new \DateTimeImmutable('2026-08-01T23:59:00', new \DateTimeZone('UTC')),
+        );
+        $body = json_decode($b->stub()->lastCall()['body'], true);
+        $this->assertSame('2026-08-01', $body['dueOn']);
     }
 
     public function testListMembers(): void

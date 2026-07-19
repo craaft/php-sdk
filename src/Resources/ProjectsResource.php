@@ -10,9 +10,13 @@ use Craaft\Models\BoardMember;
 use Craaft\Models\BoardMemberGrant;
 use Craaft\Models\Card;
 use Craaft\Models\Column;
+use Craaft\Models\Milestone;
 use Craaft\Models\Project;
 use Craaft\Models\ProjectExport;
+use Craaft\Util\BulkCards;
+use Craaft\Util\Dates;
 use Craaft\Util\Id;
+use DateTimeInterface;
 
 /** Endpoints under /projects and /projects/{id}/.... */
 final class ProjectsResource extends BaseResource
@@ -137,6 +141,57 @@ final class ProjectsResource extends BaseResource
         }
         $data = $this->transport->request('POST', '/projects/' . Id::segment($projectId) . '/cards', null, $body);
         return Card::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Create up to 100 cards in one transaction.
+     *
+     * Each item is an associative array with required `title` and
+     * `column` keys, plus optional `description`, `position` (float;
+     * omit to append to the end of the column in request order),
+     * `dueDate` (DateTimeInterface or RFC 3339 string),
+     * `assignedUserId`, `size` (int), `priority` (Priority enum or
+     * string), and `tags` (list of strings). Unlike `createCard()`, the
+     * assignee is NOT defaulted to the caller - omit `assignedUserId`
+     * for an unassigned card.
+     *
+     * All-or-nothing: one invalid item rolls back the whole batch and
+     * the server's ValidationError names the offending index
+     * (`cards[3]: title is required`). Bulk requests never send
+     * notification emails.
+     *
+     * @param list<array<string, mixed>> $cards
+     * @return list<Card> Created cards, in request order
+     */
+    public function createCards(string $projectId, array $cards): array
+    {
+        $body = ['cards' => BulkCards::normalize($cards)];
+        $data = $this->transport->request('POST', '/projects/' . Id::segment($projectId) . '/cards/bulk', null, $body);
+        $rows = $this->ensureArray($data)['cards'] ?? [];
+        return array_map([Card::class, 'fromApi'], is_array($rows) ? $rows : []);
+    }
+
+    /**
+     * List a project's milestones, ordered by dueOn then creation.
+     *
+     * @return list<Milestone>
+     */
+    public function listMilestones(string $projectId): array
+    {
+        $data = $this->transport->request('GET', '/projects/' . Id::segment($projectId) . '/milestones');
+        return array_map([Milestone::class, 'fromApi'], is_array($data) ? $data : []);
+    }
+
+    /**
+     * Add a milestone (board admins only; PermissionError for other
+     * board members). `$name` max 200 chars; `$dueOn` accepts a
+     * DateTimeInterface or a plain `YYYY-MM-DD` string.
+     */
+    public function addMilestone(string $projectId, string $name, DateTimeInterface|string $dueOn): Milestone
+    {
+        $body = ['name' => $name, 'dueOn' => Dates::serializeDate($dueOn)];
+        $data = $this->transport->request('POST', '/projects/' . Id::segment($projectId) . '/milestones', null, $body);
+        return Milestone::fromApi($this->ensureArray($data));
     }
 
     public function addColumn(string $projectId, string $title): Column

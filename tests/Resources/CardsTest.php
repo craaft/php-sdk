@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Craaft\Tests\Resources;
 
-use Craaft\CraaftClient;
 use Craaft\Enums\Priority;
 use Craaft\Exceptions\ValidationError;
 use Craaft\Tests\ClientBuilder;
-use Craaft\Tests\Http\StubExecutor;
 use DateTimeImmutable;
 use DateTimeZone;
 use PHPUnit\Framework\TestCase;
@@ -217,5 +215,162 @@ final class CardsTest extends TestCase
         $b->stub()->enqueueJson(200, []);
         $b->client()->cards->hygiene(\Craaft\Enums\HygieneType::Stuck);
         $this->assertStringContainsString('type=stuck', $b->stub()->lastCall()['url']);
+    }
+
+    public function testBulkUpdatePassesItemsVerbatim(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => [$this->card()]]);
+        $b->client()->cards->bulkUpdate([
+            ['id' => 'card1', 'title' => 'Renamed', 'dueDate' => null, 'assignedUserId' => null],
+        ]);
+        $call = $b->stub()->lastCall();
+        $this->assertSame('PATCH', $call['method']);
+        $this->assertSame(self::BASE . '/cards/bulk', $call['url']);
+        // Explicit nulls must survive into the JSON body (null = clear),
+        // and absent keys must stay absent (absent = leave alone).
+        $this->assertSame(
+            '{"cards":[{"id":"card1","title":"Renamed","dueDate":null,"assignedUserId":null}]}',
+            $call['body'],
+        );
+    }
+
+    public function testBulkUpdateNormalizesValueTypes(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => []]);
+        $b->client()->cards->bulkUpdate([
+            [
+                'id' => 'card1',
+                'dueDate' => new DateTimeImmutable('2026-06-01T10:00:00', new DateTimeZone('UTC')),
+                'priority' => Priority::Urgent,
+                'tags' => [3 => 'launch'],
+            ],
+        ]);
+        $body = json_decode($b->stub()->lastCall()['body'], true);
+        $this->assertSame('2026-06-01T10:00:00+00:00', $body['cards'][0]['dueDate']);
+        $this->assertSame('urgent', $body['cards'][0]['priority']);
+        $this->assertSame(['launch'], $body['cards'][0]['tags']);
+    }
+
+    public function testBulkUpdateReturnsCardsInOrder(): void
+    {
+        $b = new ClientBuilder();
+        $second = array_merge($this->card(), ['id' => 'card2', 'title' => 'y']);
+        $b->stub()->enqueueJson(200, ['cards' => [$this->card(), $second]]);
+        $cards = $b->client()->cards->bulkUpdate([
+            ['id' => 'card1', 'title' => 'x'],
+            ['id' => 'card2', 'title' => 'y'],
+        ]);
+        $this->assertCount(2, $cards);
+        $this->assertSame('card1', $cards[0]->id);
+        $this->assertSame('card2', $cards[1]->id);
+    }
+
+    public function testBulkUpdateRejectsEmptyBatch(): void
+    {
+        $c = (new ClientBuilder())->client();
+        $this->expectException(\InvalidArgumentException::class);
+        $c->cards->bulkUpdate([]);
+    }
+
+    public function testBulkUpdateRejectsOversizedBatch(): void
+    {
+        $c = (new ClientBuilder())->client();
+        $this->expectException(\InvalidArgumentException::class);
+        $c->cards->bulkUpdate(array_fill(0, 101, ['id' => 'x']));
+    }
+
+    public function testBulkUpdate400NamesOffendingIndex(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(400, ['error' => 'cards[3]: title is required']);
+        $this->expectException(ValidationError::class);
+        $this->expectExceptionMessage('cards[3]: title is required');
+        $b->client()->cards->bulkUpdate([['id' => 'card1', 'title' => '']]);
+    }
+
+    public function testBulkMoveSameBoard(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => [$this->card()]]);
+        $cards = $b->client()->cards->bulkMove(['card1', 'card2'], column: 'done');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/cards/bulk/move', $call['url']);
+        $this->assertSame(
+            ['ids' => ['card1', 'card2'], 'column' => 'done'],
+            json_decode($call['body'], true),
+        );
+        $this->assertSame('card1', $cards[0]->id);
+    }
+
+    public function testBulkMoveToAnotherBoard(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => []]);
+        $b->client()->cards->bulkMove(['card1'], column: 'todo', targetProjectId: 'p2');
+        $this->assertSame(
+            ['ids' => ['card1'], 'column' => 'todo', 'targetProjectId' => 'p2'],
+            json_decode($b->stub()->lastCall()['body'], true),
+        );
+    }
+
+    public function testBulkMoveRejectsEmptyBatch(): void
+    {
+        $c = (new ClientBuilder())->client();
+        $this->expectException(\InvalidArgumentException::class);
+        $c->cards->bulkMove([], column: 'done');
+    }
+
+    public function testBulkMove400OnMultipleBoardsWithoutTarget(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(400, ['error' => 'cards span multiple boards; pass targetProjectId']);
+        $this->expectException(ValidationError::class);
+        $b->client()->cards->bulkMove(['card1', 'card9'], column: 'done');
+    }
+
+    public function testBulkMove422OnUnknownColumn(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(422, ['error' => 'column does not exist']);
+        $this->expectException(ValidationError::class);
+        $b->client()->cards->bulkMove(['card1'], column: 'nope', targetProjectId: 'p2');
+    }
+
+    private function checklistItem(): array
+    {
+        return [
+            'id' => 'ck1',
+            'cardId' => 'card1',
+            'text' => 'write tests',
+            'done' => false,
+            'position' => 1.0,
+            'createdAt' => '2026-05-08T10:00:00Z',
+            'updatedAt' => '2026-05-08T10:00:00Z',
+        ];
+    }
+
+    public function testListChecklist(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [$this->checklistItem()]);
+        $items = $b->client()->cards->listChecklist('card1');
+        $this->assertSame(self::BASE . '/cards/card1/checklist', $b->stub()->lastCall()['url']);
+        $this->assertSame('write tests', $items[0]->text);
+        $this->assertFalse($items[0]->done);
+    }
+
+    public function testAddChecklistItem(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, $this->checklistItem());
+        $item = $b->client()->cards->addChecklistItem('card1', text: 'write tests');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/cards/card1/checklist', $call['url']);
+        $this->assertSame(['text' => 'write tests'], json_decode($call['body'], true));
+        $this->assertSame('ck1', $item->id);
     }
 }

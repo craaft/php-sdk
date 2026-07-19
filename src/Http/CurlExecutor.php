@@ -23,7 +23,7 @@ final class CurlExecutor
      */
     public function __construct(?callable $sleeper = null)
     {
-        $this->sleeper = $sleeper ?? static fn (int $us): int => usleep($us) ?? 0;
+        $this->sleeper = $sleeper ?? static fn(int $us): int => usleep($us) ?? 0;
     }
 
     /**

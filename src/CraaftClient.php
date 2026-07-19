@@ -9,10 +9,12 @@ use Craaft\Http\RetryConfig;
 use Craaft\Http\Transport;
 use Craaft\Resources\AttachmentsResource;
 use Craaft\Resources\CardsResource;
+use Craaft\Resources\ChecklistResource;
 use Craaft\Resources\ColumnsResource;
 use Craaft\Resources\CommentsResource;
-use Craaft\Resources\MeResource;
 use Craaft\Resources\MembersResource;
+use Craaft\Resources\MeResource;
+use Craaft\Resources\MilestonesResource;
 use Craaft\Resources\ProjectsResource;
 
 /**
@@ -27,7 +29,7 @@ final class CraaftClient
     public const DEFAULT_TIMEOUT = 30.0;
     public const ENV_TOKEN = 'CRAAFT_API_TOKEN';
     public const ENV_BASE_URL = 'CRAAFT_BASE_URL';
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     /** Hosts allowed to use plain http:// (development only). */
     private const PLAINTEXT_HOSTS = ['localhost', '127.0.0.1', '::1'];
@@ -43,6 +45,8 @@ final class CraaftClient
     public readonly CommentsResource $comments;
     public readonly ColumnsResource $columns;
     public readonly MembersResource $members;
+    public readonly ChecklistResource $checklist;
+    public readonly MilestonesResource $milestones;
 
     /**
      * @param ?RetryConfig $retry Pass null to use the default policy. Pass
@@ -64,7 +68,7 @@ final class CraaftClient
         $rawToken = $apiKey ?? $envToken;
         if ($rawToken === null || $rawToken === '') {
             throw new CraaftError(
-                'API key required: pass $apiKey or set the ' . self::ENV_TOKEN . ' environment variable.'
+                'API key required: pass $apiKey or set the ' . self::ENV_TOKEN . ' environment variable.',
             );
         }
         $token = self::validateToken($rawToken);
@@ -91,6 +95,8 @@ final class CraaftClient
         $this->comments = new CommentsResource($this->transport);
         $this->columns = new ColumnsResource($this->transport);
         $this->members = new MembersResource($this->transport);
+        $this->checklist = new ChecklistResource($this->transport);
+        $this->milestones = new MilestonesResource($this->transport);
     }
 
     public function close(): void
@@ -120,7 +126,7 @@ final class CraaftClient
         }
         throw new CraaftError(
             'base_url must use https:// (got ' . ($scheme !== '' ? "'{$scheme}'" : 'none') . '). '
-            . 'Plain http:// is only allowed for localhost during development.'
+            . 'Plain http:// is only allowed for localhost during development.',
         );
     }
 
@@ -133,7 +139,7 @@ final class CraaftClient
         if (preg_match(self::TOKEN_RE, $stripped) !== 1) {
             throw new CraaftError(
                 'API key does not match the expected format `cra_<chars>`. '
-                . 'Check for stray whitespace or a copy-paste error.'
+                . 'Check for stray whitespace or a copy-paste error.',
             );
         }
         return $stripped;

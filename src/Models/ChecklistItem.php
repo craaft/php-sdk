@@ -7,13 +7,14 @@ namespace Craaft\Models;
 use Craaft\Util\Dates;
 use DateTimeImmutable;
 
-readonly class Comment
+readonly class ChecklistItem
 {
     public function __construct(
         public string $id,
         public string $cardId,
-        public string $authorId,
-        public string $body,
+        public string $text,
+        public bool $done,
+        public float $position,
         public DateTimeImmutable $createdAt,
         public DateTimeImmutable $updatedAt,
     ) {}
@@ -21,16 +22,14 @@ readonly class Comment
     /** @param array<string, mixed> $data */
     public static function fromApi(array $data): self
     {
-        $createdAt = Dates::parse((string) $data['createdAt']);
-        $updatedAt = Dates::parse((string) ($data['updatedAt'] ?? $data['createdAt']));
-
         return new self(
             id: (string) $data['id'],
             cardId: (string) $data['cardId'],
-            authorId: (string) $data['authorId'],
-            body: (string) $data['body'],
-            createdAt: $createdAt ?? throw new \InvalidArgumentException('missing createdAt'),
-            updatedAt: $updatedAt ?? throw new \InvalidArgumentException('missing updatedAt'),
+            text: (string) $data['text'],
+            done: (bool) ($data['done'] ?? false),
+            position: (float) ($data['position'] ?? 0.0),
+            createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
+            updatedAt: Dates::parse((string) $data['updatedAt']) ?? throw new \InvalidArgumentException('missing updatedAt'),
         );
     }
 }

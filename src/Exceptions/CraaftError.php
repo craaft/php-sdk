@@ -9,6 +9,4 @@ use RuntimeException;
 /**
  * Base class for every exception raised by the Craaft client.
  */
-class CraaftError extends RuntimeException
-{
-}
+class CraaftError extends RuntimeException {}

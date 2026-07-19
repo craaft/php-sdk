@@ -65,7 +65,7 @@ final class AttachmentsResource extends BaseResource
             }
         }
 
-        if ($contents === '' ) {
+        if ($contents === '') {
             throw new CraaftError('cannot upload an empty file');
         }
         if (strlen($contents) > self::MAX_UPLOAD_BYTES) {

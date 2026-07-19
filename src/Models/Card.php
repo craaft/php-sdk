@@ -30,6 +30,10 @@ readonly class Card
         public ?string $updatedBy,
         public ?string $updatedByName,
         public int $attachmentCount,
+        /** Completed checklist items (denormalized count). */
+        public int $checklistDone,
+        /** Total checklist items (denormalized count). */
+        public int $checklistTotal,
         public array $tags,
         public DateTimeImmutable $createdAt,
         public DateTimeImmutable $updatedAt,
@@ -58,6 +62,8 @@ readonly class Card
             updatedBy: ($data['updatedBy'] ?? null) === null ? null : (string) $data['updatedBy'],
             updatedByName: ($data['updatedByName'] ?? null) === null ? null : (string) $data['updatedByName'],
             attachmentCount: (int) ($data['attachmentCount'] ?? 0),
+            checklistDone: (int) ($data['checklistDone'] ?? 0),
+            checklistTotal: (int) ($data['checklistTotal'] ?? 0),
             tags: $tags,
             createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
             updatedAt: Dates::parse((string) $data['updatedAt']) ?? throw new \InvalidArgumentException('missing updatedAt'),

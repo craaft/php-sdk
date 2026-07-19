@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Craaft\Models;
 
-use DateTimeImmutable;
-
 readonly class User
 {
     public function __construct(
