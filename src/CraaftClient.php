@@ -16,6 +16,7 @@ use Craaft\Resources\MembersResource;
 use Craaft\Resources\MeResource;
 use Craaft\Resources\MilestonesResource;
 use Craaft\Resources\ProjectsResource;
+use Craaft\Resources\PublicResource;
 
 /**
  * Top-level synchronous client for the Craaft API.
@@ -29,7 +30,7 @@ final class CraaftClient
     public const DEFAULT_TIMEOUT = 30.0;
     public const ENV_TOKEN = 'CRAAFT_API_TOKEN';
     public const ENV_BASE_URL = 'CRAAFT_BASE_URL';
-    public const VERSION = '0.2.0';
+    public const VERSION = '0.3.0';
 
     /** Hosts allowed to use plain http:// (development only). */
     private const PLAINTEXT_HOSTS = ['localhost', '127.0.0.1', '::1'];
@@ -47,6 +48,7 @@ final class CraaftClient
     public readonly MembersResource $members;
     public readonly ChecklistResource $checklist;
     public readonly MilestonesResource $milestones;
+    public readonly PublicResource $public;
 
     /**
      * @param ?RetryConfig $retry Pass null to use the default policy. Pass
@@ -97,6 +99,22 @@ final class CraaftClient
         $this->members = new MembersResource($this->transport);
         $this->checklist = new ChecklistResource($this->transport);
         $this->milestones = new MilestonesResource($this->transport);
+        $this->public = new PublicResource($this->transport);
+    }
+
+    /**
+     * Return the server's build info.
+     *
+     * Unauthenticated and cheap, which makes it the right liveness probe
+     * for a self-hosted deployment - use it instead of a real endpoint when
+     * all you want to know is whether the host is up.
+     *
+     * @return array<string, mixed>
+     */
+    public function version(): array
+    {
+        $data = $this->transport->request('GET', '/version');
+        return is_array($data) ? $data : [];
     }
 
     public function close(): void

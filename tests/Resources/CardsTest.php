@@ -373,4 +373,57 @@ final class CardsTest extends TestCase
         $this->assertSame(['text' => 'write tests'], json_decode($call['body'], true));
         $this->assertSame('ck1', $item->id);
     }
+
+    public function testGetFetchesASingleCard(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['title' => 'Fetched'] + $this->card());
+        $card = $b->client()->cards->get('card1');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame(self::BASE . '/cards/card1', $call['url']);
+        $this->assertSame('Fetched', $card->title);
+    }
+
+    public function testGetEscapesTheId(): void
+    {
+        // Ids arrive from callers unvalidated; a traversal-shaped one must
+        // not rewrite the request path.
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, $this->card());
+        $b->client()->cards->get('../../admin');
+        $this->assertSame(self::BASE . '/cards/..%2F..%2Fadmin', $b->stub()->lastCall()['url']);
+    }
+
+    public function testCardReadsFollowingFlag(): void
+    {
+        // The API has always returned `following`; the model used to drop it.
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['following' => true] + $this->card());
+        $this->assertTrue($b->client()->cards->get('card1')->following);
+    }
+
+    public function testCardFollowingDefaultsFalseWhenAbsent(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, $this->card());
+        $this->assertFalse($b->client()->cards->get('card1')->following);
+    }
+
+    public function testFollowAndUnfollowSendNoBody(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(204);
+        $b->stub()->enqueueResponse(204);
+        $client = $b->client();
+        $client->cards->follow('card1');
+        $first = $b->stub()->lastCall();
+        $this->assertSame('POST', $first['method']);
+        $this->assertSame(self::BASE . '/cards/card1/follow', $first['url']);
+
+        $client->cards->unfollow('card1');
+        $second = $b->stub()->lastCall();
+        $this->assertSame('DELETE', $second['method']);
+        $this->assertSame(self::BASE . '/cards/card1/follow', $second['url']);
+    }
 }

@@ -37,6 +37,11 @@ readonly class Card
         public array $tags,
         public DateTimeImmutable $createdAt,
         public DateTimeImmutable $updatedAt,
+        /**
+         * Whether the authenticated caller follows this card. Scoped to the
+         * token's user, so it differs per caller for the same card.
+         */
+        public bool $following = false,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -67,6 +72,7 @@ readonly class Card
             tags: $tags,
             createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
             updatedAt: Dates::parse((string) $data['updatedAt']) ?? throw new \InvalidArgumentException('missing updatedAt'),
+            following: (bool) ($data['following'] ?? false),
         );
     }
 }

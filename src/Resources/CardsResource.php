@@ -23,6 +23,20 @@ use DateTimeInterface;
  */
 final class CardsResource extends BaseResource
 {
+    /**
+     * Fetch a single card.
+     *
+     * Returns the same shape update() responds with, including `following`.
+     * A card that does not exist and a card on a board you cannot reach both
+     * raise NotFoundError - the API makes them deliberately
+     * indistinguishable so membership cannot be probed.
+     */
+    public function get(string $cardId): Card
+    {
+        $data = $this->transport->request('GET', '/cards/' . Id::segment($cardId));
+        return Card::fromApi($this->ensureArray($data));
+    }
+
     public function update(
         string $cardId,
         ?string $title = null,
@@ -151,6 +165,23 @@ final class CardsResource extends BaseResource
     {
         $data = $this->transport->request('GET', '/cards/hygiene', ['type' => $type->value]);
         return array_map([AttentionCard::class, 'fromApi'], is_array($data) ? $data : []);
+    }
+
+    /**
+     * Subscribe to notifications for a card.
+     *
+     * Idempotent - following an already-followed card succeeds. The API
+     * returns 204 with no body, so there is nothing to inspect.
+     */
+    public function follow(string $cardId): void
+    {
+        $this->transport->request('POST', '/cards/' . Id::segment($cardId) . '/follow');
+    }
+
+    /** Unsubscribe from a card's notifications. Idempotent, no body. */
+    public function unfollow(string $cardId): void
+    {
+        $this->transport->request('DELETE', '/cards/' . Id::segment($cardId) . '/follow');
     }
 
     /** @return list<CardEvent> */

@@ -6,6 +6,7 @@ namespace Craaft\Resources;
 
 use Craaft\Enums\BoardRole;
 use Craaft\Enums\Visibility;
+use Craaft\Exceptions\CraaftError;
 use Craaft\Models\BoardMember;
 use Craaft\Models\BoardMemberGrant;
 use Craaft\Models\Card;
@@ -21,6 +22,22 @@ use DateTimeInterface;
 /** Endpoints under /projects and /projects/{id}/.... */
 final class ProjectsResource extends BaseResource
 {
+    /**
+     * Server cap for board backgrounds, in bytes. Lower than the 25 MiB
+     * attachment cap because a background is decoded on every board load.
+     */
+    private const MAX_BACKGROUND_BYTES = 10 * 1024 * 1024;
+
+    private const MAX_BACKGROUND_DOWNLOAD_BYTES = self::MAX_BACKGROUND_BYTES + (1 << 20);
+
+    /**
+     * The server both checks the declared type against this set AND sniffs
+     * the leading bytes, so a renamed file is rejected rather than stored.
+     *
+     * @var list<string>
+     */
+    private const BACKGROUND_CONTENT_TYPES = ['image/gif', 'image/jpeg', 'image/png', 'image/webp'];
+
     /** @return list<Project> */
     public function list(): array
     {
@@ -90,10 +107,38 @@ final class ProjectsResource extends BaseResource
         $this->transport->request('DELETE', '/projects/' . Id::segment($projectId));
     }
 
+    /** Export the board as structured JSON. */
     public function export(string $projectId): ProjectExport
     {
-        $data = $this->transport->request('GET', '/projects/' . Id::segment($projectId) . '/export');
+        $data = $this->transport->request(
+            'GET',
+            '/projects/' . Id::segment($projectId) . '/export',
+            ['format' => 'json'],
+        );
         return ProjectExport::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Export the board as CSV.
+     *
+     * The CSV is the flat card list only - it cannot carry the nested
+     * columns, comments and attachment metadata that export() returns, so
+     * prefer JSON unless a spreadsheet is the destination.
+     */
+    public function exportCsv(string $projectId): string
+    {
+        $data = $this->transport->request(
+            'GET',
+            '/projects/' . Id::segment($projectId) . '/export',
+            ['format' => 'csv'],
+            null,
+            null,
+            false,
+        );
+        if (!is_string($data)) {
+            throw new CraaftError('expected a raw response body for a CSV export');
+        }
+        return $data;
     }
 
     /** @return list<string> */
@@ -169,6 +214,157 @@ final class ProjectsResource extends BaseResource
         $data = $this->transport->request('POST', '/projects/' . Id::segment($projectId) . '/cards/bulk', null, $body);
         $rows = $this->ensureArray($data)['cards'] ?? [];
         return array_map([Card::class, 'fromApi'], is_array($rows) ? $rows : []);
+    }
+
+    /**
+     * Renumber cards onto one column as positions 1, 2, 3, ... in order.
+     *
+     * This is board maintenance, not an import path: it exists for when
+     * repeated midpoint inserts have squeezed the gap between two
+     * neighbours down to nothing, so a drop has no representable position
+     * left. Every id must already be on this board (NotFoundError
+     * otherwise), and the whole call is one all-or-nothing transaction
+     * that sends no notification emails. Sized for a real column - up to
+     * 10 000 ids. To create cards, use createCards().
+     *
+     * @param list<string> $ids
+     * @return list<Card>
+     */
+    public function rebalanceCards(string $projectId, array $ids, string $column): array
+    {
+        $count = count($ids);
+        if ($count < 1 || $count > 10000) {
+            throw new \InvalidArgumentException('ids must contain between 1 and 10000 items');
+        }
+        $data = $this->transport->request(
+            'POST',
+            '/projects/' . Id::segment($projectId) . '/cards/rebalance',
+            null,
+            ['ids' => array_values($ids), 'column' => $column],
+        );
+        $rows = $this->ensureArray($data)['cards'] ?? [];
+        return array_map([Card::class, 'fromApi'], is_array($rows) ? $rows : []);
+    }
+
+    /**
+     * Set the board's background image. Board admins only.
+     *
+     * Accepts a filesystem path, a string of bytes, or an SplFileInfo,
+     * capped at 10 MiB. The type must be PNG, JPEG, WebP or GIF, and the
+     * server additionally sniffs the leading bytes - a mislabelled file is
+     * rejected, not stored. Setting a background clears any
+     * backgroundColor; the two are mutually exclusive.
+     */
+    public function uploadBackground(
+        string $projectId,
+        string|\SplFileInfo $file,
+        ?string $filename = null,
+        ?string $contentType = null,
+    ): Project {
+        [$name, $contents, $ct] = $this->resolveUpload($file, $filename, $contentType);
+
+        if ($contents === '') {
+            throw new CraaftError('cannot upload an empty file');
+        }
+        if (strlen($contents) > self::MAX_BACKGROUND_BYTES) {
+            throw new CraaftError('file exceeds the 10 MiB upload limit');
+        }
+        if (!in_array($ct, self::BACKGROUND_CONTENT_TYPES, true)) {
+            $allowed = implode(', ', self::BACKGROUND_CONTENT_TYPES);
+            throw new CraaftError("background content type {$ct} is not one of: {$allowed}");
+        }
+
+        $files = [
+            'file' => [
+                'name' => $name,
+                'contents' => $contents,
+                'contentType' => $ct,
+                'filename' => $name,
+            ],
+        ];
+        $data = $this->transport->request(
+            'POST',
+            '/projects/' . Id::segment($projectId) . '/background-image',
+            null,
+            null,
+            $files,
+        );
+        return Project::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Fetch the board background bytes.
+     *
+     * Raises NotFoundError when the board has no background set, which is
+     * the same status you get for a board you cannot reach.
+     */
+    public function downloadBackground(string $projectId): string
+    {
+        $data = $this->transport->request(
+            'GET',
+            '/projects/' . Id::segment($projectId) . '/background-image',
+            null,
+            null,
+            null,
+            false,
+            self::MAX_BACKGROUND_DOWNLOAD_BYTES,
+        );
+        if (!is_string($data)) {
+            throw new CraaftError('expected binary response body for a background download');
+        }
+        return $data;
+    }
+
+    /**
+     * Remove the board background. Board admins only.
+     *
+     * Returns the updated project rather than 204, so the caller can see
+     * the cleared state without a re-fetch.
+     */
+    public function deleteBackground(string $projectId): Project
+    {
+        $data = $this->transport->request(
+            'DELETE',
+            '/projects/' . Id::segment($projectId) . '/background-image',
+        );
+        return Project::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Normalize an upload argument into [name, bytes, contentType].
+     *
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private function resolveUpload(
+        string|\SplFileInfo $file,
+        ?string $filename,
+        ?string $contentType,
+    ): array {
+        if ($file instanceof \SplFileInfo) {
+            $path = $file->getPathname();
+            if (!is_file($path) || !is_readable($path)) {
+                throw new CraaftError("cannot read file: {$path}");
+            }
+            $contents = file_get_contents($path);
+            if ($contents === false) {
+                throw new CraaftError("failed to read file: {$path}");
+            }
+            $name = $filename ?? $file->getFilename();
+        } elseif (is_file($file) && is_readable($file)) {
+            $contents = file_get_contents($file);
+            if ($contents === false) {
+                throw new CraaftError("failed to read file: {$file}");
+            }
+            $name = $filename ?? basename($file);
+        } else {
+            // Treat the string as raw bytes.
+            $contents = $file;
+            $name = $filename ?? 'background';
+        }
+
+        $guessed = @mime_content_type($name);
+        $ct = $contentType ?? (is_string($guessed) && $guessed !== '' ? $guessed : 'application/octet-stream');
+        return [$name, $contents, $ct];
     }
 
     /**
