@@ -6,6 +6,7 @@ namespace Craaft\Tests\Resources;
 
 use Craaft\Enums\BoardRole;
 use Craaft\Enums\Visibility;
+use Craaft\Exceptions\CraaftError;
 use Craaft\Http\HttpAttempt;
 use Craaft\Tests\ClientBuilder;
 use PHPUnit\Framework\TestCase;
@@ -311,5 +312,118 @@ final class ProjectsTest extends TestCase
         $b->stub()->enqueueJson(200, $this->project());
         $b->client()->projects->get('weird/id');
         $this->assertSame(self::BASE . '/projects/weird%2Fid', $b->stub()->lastCall()['url']);
+    }
+
+    public function testRebalanceCardsPostsIdsInOrder(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => []]);
+        $b->client()->projects->rebalanceCards('p1', ['c3', 'c1', 'c2'], 'doing');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/projects/p1/cards/rebalance', $call['url']);
+        // Request order IS the resulting order, so it must survive verbatim.
+        $this->assertSame(
+            ['ids' => ['c3', 'c1', 'c2'], 'column' => 'doing'],
+            json_decode($call['body'], true),
+        );
+    }
+
+    public function testRebalanceCardsRejectsAnEmptyListBeforeTheRequest(): void
+    {
+        $b = new ClientBuilder();
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $b->client()->projects->rebalanceCards('p1', [], 'doing');
+        } finally {
+            $this->assertSame(0, $b->stub()->callCount());
+        }
+    }
+
+    public function testUploadBackgroundSendsMultipart(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, $this->project());
+        $b->client()->projects->uploadBackground('p1', "\x89PNG\r\n", 'bg.png', 'image/png');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/projects/p1/background-image', $call['url']);
+        $this->assertStringContainsString('multipart/form-data', implode("\n", $call['headers']));
+    }
+
+    public function testUploadBackgroundRejectsANonImageType(): void
+    {
+        // The server sniffs the bytes too, but failing here saves a round
+        // trip and gives a clearer message than a bare 400.
+        $b = new ClientBuilder();
+        $this->expectException(CraaftError::class);
+        $this->expectExceptionMessageMatches('/not one of/');
+        try {
+            $b->client()->projects->uploadBackground('p1', 'hello', 'notes.txt', 'text/plain');
+        } finally {
+            $this->assertSame(0, $b->stub()->callCount());
+        }
+    }
+
+    public function testUploadBackgroundRejectsOver10Mib(): void
+    {
+        $b = new ClientBuilder();
+        $this->expectException(CraaftError::class);
+        $this->expectExceptionMessageMatches('/10 MiB/');
+        try {
+            $b->client()->projects->uploadBackground(
+                'p1',
+                str_repeat('x', 10 * 1024 * 1024 + 1),
+                'bg.png',
+                'image/png',
+            );
+        } finally {
+            $this->assertSame(0, $b->stub()->callCount());
+        }
+    }
+
+    public function testDownloadBackgroundReturnsBytes(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(200, "\x89PNG\r\n", contentType: 'image/png');
+        $this->assertSame("\x89PNG\r\n", $b->client()->projects->downloadBackground('p1'));
+    }
+
+    public function testDeleteBackgroundReturnsTheUpdatedProject(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, $this->project());
+        $project = $b->client()->projects->deleteBackground('p1');
+        $this->assertSame('DELETE', $b->stub()->lastCall()['method']);
+        $this->assertSame('p1', $project->id);
+    }
+
+    public function testExportAsksForJson(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            'version' => 1,
+            'exportedAt' => '2026-05-08T10:00:00Z',
+            'project' => [
+                'id' => 'p1',
+                'name' => 'Demo',
+                'isFavorite' => false,
+                'createdAt' => '2026-05-08T10:00:00Z',
+                'updatedAt' => '2026-05-08T10:00:00Z',
+            ],
+            'columns' => [],
+            'cards' => [],
+        ]);
+        $b->client()->projects->export('p1');
+        $this->assertStringContainsString('format=json', $b->stub()->lastCall()['url']);
+    }
+
+    public function testExportCsvReturnsRawBytes(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(200, "id,title\n1,Hello\n", contentType: 'text/csv');
+        $out = $b->client()->projects->exportCsv('p1');
+        $this->assertSame("id,title\n1,Hello\n", $out);
+        $this->assertStringContainsString('format=csv', $b->stub()->lastCall()['url']);
     }
 }

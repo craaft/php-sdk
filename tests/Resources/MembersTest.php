@@ -69,4 +69,52 @@ final class MembersTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $b->client()->members->createInvitation('x@y.co', 'superadmin');
     }
+
+    public function testUpdateRolePatchesTheWorkspaceRole(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['role' => 'admin'] + $this->member());
+        $member = $b->client()->members->updateRole('u2', WorkspaceRole::Admin);
+        $call = $b->stub()->lastCall();
+        $this->assertSame('PATCH', $call['method']);
+        $this->assertStringEndsWith('/members/u2', $call['url']);
+        $this->assertSame(['role' => 'admin'], json_decode($call['body'], true));
+        $this->assertSame(WorkspaceRole::Admin, $member->role);
+    }
+
+    public function testUpdateRoleRefusesOwner(): void
+    {
+        // Ownership is a property of the workspace, not a role to hand out.
+        $b = new ClientBuilder();
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $b->client()->members->updateRole('u2', WorkspaceRole::Owner);
+        } finally {
+            $this->assertSame(0, $b->stub()->callCount());
+        }
+    }
+
+    public function testRemoveMemberDeletes(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(204);
+        $b->client()->members->remove('u2');
+        $this->assertSame('DELETE', $b->stub()->lastCall()['method']);
+    }
+
+    public function testRevokeInvitationDeletes(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(204);
+        $b->client()->members->revokeInvitation('inv1');
+        $this->assertStringEndsWith('/invitations/inv1', $b->stub()->lastCall()['url']);
+    }
+
+    public function testMemberIdsAreEscaped(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueResponse(204);
+        $b->client()->members->remove('../admin');
+        $this->assertStringEndsWith('/members/..%2Fadmin', $b->stub()->lastCall()['url']);
+    }
 }
