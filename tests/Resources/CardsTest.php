@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Craaft\Tests\Resources;
 
+use Craaft\Enums\CardEventType;
 use Craaft\Enums\Priority;
 use Craaft\Exceptions\ValidationError;
 use Craaft\Models\CardSummary;
@@ -469,6 +470,29 @@ final class CardsTest extends TestCase
         $this->assertSame('doing', $d->events[0]->toValue);
         $this->assertSame('t', $d->checklist[0]->text);
         $this->assertSame([], $d->attachments);
+    }
+
+    public function testEventsParseABoardMove(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            [
+                'id' => 'ev1', 'type' => 'moved_board',
+                'fromValue' => 'p1:todo', 'toValue' => 'p2:done',
+                'fromName' => 'Product Launch', 'toName' => 'Website Redesign',
+                'fromDetail' => 'To Do', 'toDetail' => 'Done',
+                'createdAt' => '2026-09-28T10:00:00Z',
+            ],
+            // A board the caller can't see comes back without names.
+            ['id' => 'ev2', 'type' => 'moved_board', 'fromValue' => 'p9:todo', 'toValue' => 'p2:todo', 'createdAt' => '2026-09-28T11:00:00Z'],
+        ]);
+        $events = $b->client()->cards->listEvents('card1');
+        $this->assertSame(CardEventType::MovedBoard, $events[0]->type);
+        $this->assertSame('Product Launch', $events[0]->fromName);
+        $this->assertSame('To Do', $events[0]->fromDetail);
+        $this->assertSame('Done', $events[0]->toDetail);
+        $this->assertNull($events[1]->fromName);
+        $this->assertNull($events[1]->fromDetail);
     }
 
     public function testCardReadsFollowingFlag(): void

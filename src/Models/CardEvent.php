@@ -20,6 +20,10 @@ readonly class CardEvent
         public ?string $toName = null,
         public ?string $actorId = null,
         public ?string $actorName = null,
+        /** moved_board only: source column title (null when that board isn't visible to you). */
+        public ?string $fromDetail = null,
+        /** moved_board only: target column title (null when that board isn't visible to you). */
+        public ?string $toDetail = null,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -41,6 +45,8 @@ readonly class CardEvent
             toName: ($data['toName'] ?? null) === null ? null : (string) $data['toName'],
             actorId: ($data['actorId'] ?? null) === null ? null : (string) $data['actorId'],
             actorName: ($data['actorName'] ?? null) === null ? null : (string) $data['actorName'],
+            fromDetail: ($data['fromDetail'] ?? null) === null ? null : (string) $data['fromDetail'],
+            toDetail: ($data['toDetail'] ?? null) === null ? null : (string) $data['toDetail'],
         );
     }
 }
