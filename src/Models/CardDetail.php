@@ -30,10 +30,10 @@ readonly class CardDetail
     {
         return new self(
             card: Card::fromApi((array) $data['card']),
-            comments: array_map(static fn (array $c): Comment => Comment::fromApi($c), array_values((array) ($data['comments'] ?? []))),
-            events: array_map(static fn (array $e): CardEvent => CardEvent::fromApi($e), array_values((array) ($data['events'] ?? []))),
-            checklist: array_map(static fn (array $i): ChecklistItem => ChecklistItem::fromApi($i), array_values((array) ($data['checklist'] ?? []))),
-            attachments: array_map(static fn (array $a): Attachment => Attachment::fromApi($a), array_values((array) ($data['attachments'] ?? []))),
+            comments: array_map(static fn(array $c): Comment => Comment::fromApi($c), array_values((array) ($data['comments'] ?? []))),
+            events: array_map(static fn(array $e): CardEvent => CardEvent::fromApi($e), array_values((array) ($data['events'] ?? []))),
+            checklist: array_map(static fn(array $i): ChecklistItem => ChecklistItem::fromApi($i), array_values((array) ($data['checklist'] ?? []))),
+            attachments: array_map(static fn(array $a): Attachment => Attachment::fromApi($a), array_values((array) ($data['attachments'] ?? []))),
         );
     }
 }
