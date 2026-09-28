@@ -19,6 +19,13 @@ readonly class Invitation
         public DateTimeImmutable $createdAt,
         public DateTimeImmutable $expiresAt,
         public array $boardGrants,
+        /**
+         * True when `MembersResource::createInvitation()` found an existing
+         * verified account with this email and added it to the workspace
+         * immediately, instead of leaving a pending invite. Always false on
+         * `listInvitations()`, which only ever lists pending invitations.
+         */
+        public bool $consumed = false,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -34,6 +41,7 @@ readonly class Invitation
             createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
             expiresAt: Dates::parse((string) $data['expiresAt']) ?? throw new \InvalidArgumentException('missing expiresAt'),
             boardGrants: array_map([InvitationGrant::class, 'fromApi'], is_array($grantsRaw) ? $grantsRaw : []),
+            consumed: (bool) ($data['consumed'] ?? false),
         );
     }
 }

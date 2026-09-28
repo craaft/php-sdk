@@ -66,7 +66,7 @@ $client->cards->update(
 
 $client->cards->addComment($card->id, body: 'lgtm');
 
-// upcoming() and search() return CardSummary previews, not full cards.
+// upcoming() and search() return lightweight previews, not full cards.
 foreach ($client->cards->upcoming() as $summary) {
     echo "{$summary->title} - {$summary->dueDate?->format('c')} ({$summary->projectName})\n";
 }
@@ -97,17 +97,22 @@ development - anything else must be `https://` to avoid leaking the bearer token
 | Sub-client           | Methods |
 |----------------------|---------|
 | `$client->me`        | `get()`, `update(name:, email:, username:)` |
-| `$client->projects`  | `list()`, `get($id)`, `create($name, $description)`, `update($id, ...)`, `delete($id)`, `export($id)`, `exportCsv($id)`, `listTags($id)`, `enableShare($id)`, `disableShare($id)`, `listCards($id)`, `createCard($id, ...)`, `createCards($id, $cards)`, `rebalanceCards($id, $ids, $column)`, `uploadBackground($id, $file)`, `downloadBackground($id)`, `deleteBackground($id)`, `addColumn($id, $title)`, `listMilestones($id)`, `addMilestone($id, $name, $dueOn)`, `listMembers($id)`, `addMember($id, $userId, $role)`, `updateMember($id, $userId, $role)`, `removeMember($id, $userId)` |
-| `$client->cards`     | `get($id)`, `update($id, ...)`, `bulkUpdate($cards)`, `bulkMove($ids, $column, $targetProjectId)`, `delete($id)`, `move($id, $targetProjectId, $column)`, `follow($id)`, `unfollow($id)`, `upcoming()`, `focus()`, `hygiene($type)`, `listEvents($id)`, `search($q, $limit=20)`, `listComments($id)`, `addComment($id, $body)`, `listChecklist($id)`, `addChecklistItem($id, $text)` |
+| `$client->projects`  | `list()`, `get($id)`, `create($name, $description, $template)`, `listTemplates()`, `update($id, ...)`, `delete($id)`, `export($id)`, `exportCsv($id)`, `listTags($id)`, `enableShare($id)`, `disableShare($id)`, `listCards($id)`, `listArchivedCards($id)`, `createCard($id, ...)`, `createCards($id, $cards)`, `rebalanceCards($id, $ids, $column)`, `uploadBackground($id, $file)`, `downloadBackground($id)`, `deleteBackground($id)`, `addColumn($id, $title)`, `listMilestones($id)`, `addMilestone($id, $name, $dueOn)`, `listMembers($id)`, `addMember($id, $userId, $role)`, `updateMember($id, $userId, $role)`, `removeMember($id, $userId)`, `listWebhooks($id)`, `createWebhook($id, $url, ...)` |
+| `$client->cards`     | `get($id)`, `detail($id)`, `update($id, ...)`, `bulkUpdate($cards)`, `bulkMove($ids, $column, $targetProjectId)`, `delete($id)`, `move($id, $targetProjectId, $column)`, `archive($id)`, `restore($id)`, `follow($id)`, `unfollow($id)`, `upcoming()`, `focus()`, `hygiene($type)`, `listEvents($id)`, `search($q, $limit=20)`, `listComments($id)`, `addComment($id, $body)`, `listChecklist($id)`, `addChecklistItem($id, $text)` |
 | `$client->attachments` | `listForCard($cardId)`, `upload($cardId, $file, $filename, $contentType)`, `download($attachmentId)`, `delete($attachmentId)` |
 | `$client->comments`  | `update($id, $body)`, `delete($id)` |
 | `$client->checklist` | `update($id, text:, done:)`, `delete($id)` |
-| `$client->columns`   | `update($id, ...)`, `delete($id)`, `archive($id)` |
+| `$client->columns`   | `update($id, ...)`, `delete($id)`, `archive($id)`, `archiveWithIds($id)` |
 | `$client->milestones` | `update($id, name:, dueOn:, achieved:)`, `delete($id)` |
 | `$client->members`   | `list()`, `updateRole($userId, $role)`, `remove($userId)`, `listInvitations()`, `createInvitation($email, $role, $boardGrants)`, `revokeInvitation($id)` |
+| `$client->webhooks`  | `update($id, ...)`, `delete($id)` |
+| `$client->inboundEmail` | `get($projectId)`, `enable($projectId, $targetColumn)`, `update($projectId, ...)`, `disable($projectId)` |
 | `$client->public`    | `board($token)`, `boardBackground($token)`, `avatar($userId)` - no auth required |
 
-`upcoming()` and `search()` return `array<CardSummary>` - lightweight previews.
+`search()` returns `array<SearchResult>` and `upcoming()` (and `focus()->due`)
+return `array<UpcomingCard>` - both are lightweight, endpoint-specific previews
+that extend the older shared `CardSummary` type, so code already typed against
+`CardSummary` keeps working.
 `focus()` returns a `FocusResponse` with `due`, `attention`, and `hygiene` buckets.
 `$client->version()` returns the server's build info and needs no auth, which
 makes it a cheap liveness probe.
@@ -122,6 +127,7 @@ ordinary JSON.
 
 ```php
 $card = $client->cards->get($cardId);      // single fetch, no board scan
+$detail = $client->cards->detail($cardId); // card + comments + events + checklist + attachments, one call
 if (!$card->following) {
     $client->cards->follow($cardId);       // idempotent, returns void
 }
@@ -130,6 +136,47 @@ if (!$card->following) {
 // neighbours. Request order becomes positions 1, 2, 3, ...
 $client->projects->rebalanceCards($project->id, $orderedIds, 'doing');
 ```
+
+### Board templates
+
+```php
+foreach ($client->projects->listTemplates() as $template) {
+    echo "{$template->key}: {$template->name} - {$template->description}\n";
+}
+
+$project = $client->projects->create('Sprint 12', template: 'sprint');
+```
+
+`template` is optional; omit it (or pass an empty string) for the default
+Kanban layout (`To Do` / `In Progress` / `Done`). An unknown key raises
+`ValidationError`. Any authenticated user may call `listTemplates()` - it is
+a fixed, code-defined catalogue, not per-workspace state. The create response doesn't include the board's columns; call `$client->projects->get()` on the new id to read their keys (only the default template uses `todo` / `doing` / `done`).
+
+### Archiving cards
+
+```php
+$client->cards->archive($card->id);   // off the board, still searchable
+$restored = $client->cards->restore($card->id); // back where it was archived from
+
+foreach ($client->projects->listArchivedCards($project->id) as $row) {
+    echo "{$row->card->title} archived at {$row->archivedAt->format('c')}\n";
+}
+
+// Bulk-archive every live card in a Done column - just the count.
+$count = $client->columns->archive($doneColumn->id);
+
+// Same call, but with the archived card ids so you can offer an undo.
+$result = $client->columns->archiveWithIds($doneColumn->id);
+foreach ($result->ids as $id) {
+    // $client->cards->restore($id) to undo
+}
+```
+
+`archive()` is not idempotent - archiving an already-archived card raises
+`NotFoundError`, same as a card that does not exist or is on a board you
+cannot reach. `columns->archive()` and `columns->archiveWithIds()` only
+affect a column flagged `isDone`; any other column answers with a count of
+`0` (and no ids) rather than an error.
 
 ### Board backgrounds
 
@@ -142,6 +189,55 @@ $client->projects->deleteBackground($project->id);
 Board admins only, max 10 MiB, and PNG / JPEG / WebP / GIF only - the server
 sniffs the leading bytes as well as the declared type, so a renamed file is
 rejected. A background and a `backgroundColor` are mutually exclusive.
+
+### Outbound webhooks
+
+```php
+use Craaft\Enums\WebhookFormat;
+
+$webhook = $client->projects->createWebhook(
+    $project->id,
+    'https://example.com/hooks/craaft',
+    description: 'Ops alerts',
+    events: ['card.created', 'card.archived'], // omit for every event
+);
+echo $webhook->secret; // signs the payload via X-Craaft-Signature
+
+$list = $client->projects->listWebhooks($project->id);
+echo count($list->webhooks), ' of ', count($list->eventCatalogue), ' event types subscribed';
+
+$client->webhooks->update($webhook->id, active: false);
+$client->webhooks->delete($webhook->id);
+```
+
+Board-admin only, Pro boards only (`listWebhooks()`/`createWebhook()` and
+`WebhooksResource::update()` raise `PlanLimitError` on a Free board; `delete()`
+is not plan-gated so a downgraded board can still clean up). `$format`
+defaults to `WebhookFormat::Craaft` (a signed JSON envelope); `Slack` and
+`Discord` POST an unsigned message to webhook URLs registered with those
+services. `secret` is returned on every read, not shown once - `craaft`-format
+deliveries carry it as `X-Craaft-Signature`; Slack/Discord deliveries ignore
+it. `WebhookSubscription->recentDeliveries` holds the last few attempts,
+most recent first.
+
+### Email to card
+
+```php
+$status = $client->inboundEmail->get($project->id);
+if (!$status->enabled) {
+    $address = $client->inboundEmail->enable($project->id, targetColumn: 'todo');
+    echo "Forward mail to {$address->email}\n";
+}
+
+$client->inboundEmail->update($project->id, rotate: true); // old address stops working
+$client->inboundEmail->disable($project->id);
+```
+
+Board-admin only, Pro boards only (`get()`/`enable()`/`update()` raise
+`PlanLimitError` on a Free board; `disable()` is not plan-gated). `enable()`
+raises `ConflictError` (409) if the board already has an address - use
+`update()` to change it. `update($projectId, targetColumn: '')` clears the
+target column back to the board's first column.
 
 ### Public boards
 
@@ -191,17 +287,41 @@ for you; everything else is sent as-is.
 
 Readonly value objects, one class per schema. Highlights:
 
-- `User`, `Project`, `Column`, `Card`, `Comment`, `Attachment`
+- `User`, `Project`, `Column`, `Card`, `CardDetail`, `Comment`, `Attachment`
 - `ChecklistItem`, `Milestone`
-- `CardSummary`, `AttentionCard`, `FocusResponse`, `HygieneCounts`, `CardEvent`
+- `CardSummary` (base of `SearchResult` and `UpcomingCard`), `AttentionCard`,
+  `FocusResponse`, `HygieneCounts`, `CardEvent`, `ArchivedCard`
+- `BoardTemplate` (+ `BoardTemplateColumn`)
 - `BoardMember`, `BoardMemberGrant`, `WorkspaceMember`, `Invitation`
+- `ColumnArchiveResult`
+- `WebhookSubscription` (+ `WebhookDelivery`), `WebhookList`
+- `InboundAddress`, `InboundEmailStatus`
 - `ProjectExport` (+ nested export types)
 - `PublicBoard` (+ `PublicBoardProject`, `PublicBoardColumn`, `PublicBoardCard`)
 
 Finite string fields are backed enums: `Priority` (`low`/`medium`/`high`/`urgent`),
 `BoardRole` (`admin`/`contributor`), `WorkspaceRole`, `Visibility`, `TextColor`,
-`BoardMemberSource`, `HygieneType`, `CardEventType`. Unknown enum values from the
-server resolve to `null` (forward-compatible).
+`BoardMemberSource`, `HygieneType`, `CardEventType`, `WebhookFormat`
+(`craaft`/`slack`/`discord`). Unknown enum values from the server resolve to
+`null` (forward-compatible) for the optional fields that used that pattern
+before (`Priority`, etc.); a required role-like field (`BoardRole`,
+`WorkspaceRole`, `CardEventType`, `WebhookFormat`) raises
+`InvalidArgumentException` instead, since there is no sensible default to
+fall back to.
+
+`SearchResult` (from `cards->search()`) and `UpcomingCard` (from
+`cards->upcoming()` and `focus()->due`) extend `CardSummary` rather than
+replacing it, so code already typed against the shared `CardSummary` class
+keeps compiling. Each carries every `CardSummary` field, but only some are
+ever populated for a given endpoint: `SearchResult->dueDate`,
+`->assignedUserId`, `->assignedUserName` and `->priority` are always null;
+`UpcomingCard->description`, `->updatedAt` and `->archived` are always their
+defaults (null / false). Read the field that matches the endpoint you called.
+
+`Invitation->consumed` is `true` when `createInvitation()` found an existing
+verified account with that email and added it to the workspace immediately,
+instead of leaving a pending invite - it is always `false` on
+`listInvitations()`, which only lists pending ones.
 
 `Card->following` is whether **the authenticated caller** follows the card, so
 it differs per token for the same card. `Card->size` is an optional **integer**
@@ -217,7 +337,7 @@ read milestones, but writes are board-admin only - non-admin members get a
 any board member.
 
 `attachments->upload()` sends multipart form data (max **25 MiB** per file) and
-requires a Pro/Team workspace; check `Project->canUploadAttachments` first. It
+requires a Pro workspace; check `Project->canUploadAttachments` first. It
 accepts a filesystem path, a `SplFileInfo`, or a string of raw bytes.
 
 ## Errors

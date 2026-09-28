@@ -30,6 +30,13 @@ final class MembersResource extends BaseResource
     /**
      * Invite a user by email.
      *
+     * The server wraps the created invitation as `{invitation, consumed}`
+     * rather than returning it bare; this unwraps that envelope (tolerating
+     * a bare invitation object too) and carries `consumed` through as
+     * `Invitation->consumed`. `consumed: true` means the email already
+     * belonged to a verified account, which was added to the workspace on
+     * the spot instead of getting a pending invite.
+     *
      * @param list<array{projectId: string, role: BoardRole}> $boardGrants
      */
     public function createInvitation(
@@ -48,7 +55,11 @@ final class MembersResource extends BaseResource
             );
         }
         $data = $this->transport->request('POST', '/invitations', null, $body);
-        return Invitation::fromApi(is_array($data) ? $data : []);
+        $data = is_array($data) ? $data : [];
+        $invitation = $data['invitation'] ?? $data;
+        $invitation = is_array($invitation) ? $invitation : [];
+        $invitation['consumed'] = (bool) ($data['consumed'] ?? false);
+        return Invitation::fromApi($invitation);
     }
 
     /**

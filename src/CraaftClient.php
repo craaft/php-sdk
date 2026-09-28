@@ -12,11 +12,13 @@ use Craaft\Resources\CardsResource;
 use Craaft\Resources\ChecklistResource;
 use Craaft\Resources\ColumnsResource;
 use Craaft\Resources\CommentsResource;
+use Craaft\Resources\InboundEmailResource;
 use Craaft\Resources\MembersResource;
 use Craaft\Resources\MeResource;
 use Craaft\Resources\MilestonesResource;
 use Craaft\Resources\ProjectsResource;
 use Craaft\Resources\PublicResource;
+use Craaft\Resources\WebhooksResource;
 
 /**
  * Top-level synchronous client for the Craaft API.
@@ -49,6 +51,8 @@ final class CraaftClient
     public readonly ChecklistResource $checklist;
     public readonly MilestonesResource $milestones;
     public readonly PublicResource $public;
+    public readonly WebhooksResource $webhooks;
+    public readonly InboundEmailResource $inboundEmail;
 
     /**
      * @param ?RetryConfig $retry Pass null to use the default policy. Pass
@@ -100,6 +104,8 @@ final class CraaftClient
         $this->checklist = new ChecklistResource($this->transport);
         $this->milestones = new MilestonesResource($this->transport);
         $this->public = new PublicResource($this->transport);
+        $this->webhooks = new WebhooksResource($this->transport);
+        $this->inboundEmail = new InboundEmailResource($this->transport);
     }
 
     /**

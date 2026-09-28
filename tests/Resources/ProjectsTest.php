@@ -6,6 +6,7 @@ namespace Craaft\Tests\Resources;
 
 use Craaft\Enums\BoardRole;
 use Craaft\Enums\Visibility;
+use Craaft\Enums\WebhookFormat;
 use Craaft\Exceptions\CraaftError;
 use Craaft\Http\HttpAttempt;
 use Craaft\Tests\ClientBuilder;
@@ -78,6 +79,40 @@ final class ProjectsTest extends TestCase
         $this->assertSame(['name' => 'Demo'], json_decode($b->stub()->lastCall()['body'], true));
     }
 
+    public function testCreateWithTemplate(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, $this->project());
+        $b->client()->projects->create('Demo', template: 'sprint');
+        $this->assertSame(
+            ['name' => 'Demo', 'template' => 'sprint'],
+            json_decode($b->stub()->lastCall()['body'], true),
+        );
+    }
+
+    public function testListTemplates(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            [
+                'key' => 'sprint',
+                'name' => 'Sprint',
+                'description' => 'Backlog through review for time-boxed work.',
+                'columns' => [
+                    ['title' => 'Backlog', 'color' => '', 'isDone' => false],
+                    ['title' => 'Done', 'color' => 'green', 'isDone' => true],
+                ],
+            ],
+        ]);
+        $templates = $b->client()->projects->listTemplates();
+        $this->assertSame(self::BASE . '/board-templates', $b->stub()->lastCall()['url']);
+        $this->assertSame('sprint', $templates[0]->key);
+        $this->assertSame('Sprint', $templates[0]->name);
+        $this->assertCount(2, $templates[0]->columns);
+        $this->assertTrue($templates[0]->columns[1]->isDone);
+        $this->assertSame('green', $templates[0]->columns[1]->color);
+    }
+
     public function testUpdateTranslatesVisibility(): void
     {
         $b = new ClientBuilder();
@@ -144,6 +179,21 @@ final class ProjectsTest extends TestCase
             'position' => 1.0, 'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
             'attachmentCount' => 0, 'tags' => [],
         ];
+    }
+
+    public function testListArchivedCards(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            array_merge($this->cardRow(), ['archivedAt' => '2026-05-09T10:00:00Z']),
+        ]);
+        $archived = $b->client()->projects->listArchivedCards('p1');
+        $this->assertSame(self::BASE . '/projects/p1/cards/archived', $b->stub()->lastCall()['url']);
+        $this->assertSame('card1', $archived[0]->card->id);
+        $this->assertEquals(
+            new \DateTimeImmutable('2026-05-09T10:00:00+00:00'),
+            $archived[0]->archivedAt,
+        );
     }
 
     public function testCreateCardsBulk(): void
@@ -288,6 +338,68 @@ final class ProjectsTest extends TestCase
         $b->stub()->enqueue(new HttpAttempt(204, "HTTP/1.1 204 No Content\r\n\r\n", ''));
         $b->client()->projects->removeMember('p1', 'u1');
         $this->assertSame(self::BASE . '/projects/p1/members/u1', $b->stub()->lastCall()['url']);
+    }
+
+    private function webhook(): array
+    {
+        return [
+            'id' => 'wh1', 'endpointId' => 'ep1', 'url' => 'https://example.com/hook',
+            'secret' => 'whsec_x', 'description' => '', 'format' => 'craaft', 'events' => [],
+            'active' => true, 'createdAt' => '2026-05-08T10:00:00Z', 'recentDeliveries' => [],
+        ];
+    }
+
+    public function testListWebhooks(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            'webhooks' => [$this->webhook()],
+            'eventCatalogue' => ['card.created', 'card.updated'],
+        ]);
+        $list = $b->client()->projects->listWebhooks('p1');
+        $this->assertSame(self::BASE . '/projects/p1/webhooks', $b->stub()->lastCall()['url']);
+        $this->assertSame('wh1', $list->webhooks[0]->id);
+        $this->assertSame(WebhookFormat::Craaft, $list->webhooks[0]->format);
+        $this->assertSame(['card.created', 'card.updated'], $list->eventCatalogue);
+    }
+
+    public function testCreateWebhookDefaultsToCraaftFormat(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, $this->webhook());
+        $wh = $b->client()->projects->createWebhook('p1', 'https://example.com/hook');
+        $this->assertSame(
+            ['url' => 'https://example.com/hook'],
+            json_decode($b->stub()->lastCall()['body'], true),
+        );
+        $this->assertSame('wh1', $wh->id);
+        $this->assertSame('whsec_x', $wh->secret);
+    }
+
+    public function testCreateWebhookWithFormatAndEvents(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, array_merge($this->webhook(), [
+            'format' => 'slack', 'events' => ['card.created'],
+        ]));
+        $wh = $b->client()->projects->createWebhook(
+            'p1',
+            'https://hooks.slack.com/services/x',
+            description: 'Slack alerts',
+            format: WebhookFormat::Slack,
+            events: ['card.created'],
+        );
+        $this->assertSame(
+            [
+                'url' => 'https://hooks.slack.com/services/x',
+                'description' => 'Slack alerts',
+                'format' => 'slack',
+                'events' => ['card.created'],
+            ],
+            json_decode($b->stub()->lastCall()['body'], true),
+        );
+        $this->assertSame(WebhookFormat::Slack, $wh->format);
+        $this->assertSame(['card.created'], $wh->events);
     }
 
     public function testExport(): void

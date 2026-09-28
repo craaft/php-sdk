@@ -118,6 +118,9 @@ final class ClientTest extends TestCase
         $this->assertNotNull($c->members);
         $this->assertNotNull($c->checklist);
         $this->assertNotNull($c->milestones);
+        $this->assertNotNull($c->public);
+        $this->assertNotNull($c->webhooks);
+        $this->assertNotNull($c->inboundEmail);
     }
 
     public function testEndToEndAuthorizationHeader(): void

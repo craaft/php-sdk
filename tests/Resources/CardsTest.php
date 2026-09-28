@@ -6,6 +6,9 @@ namespace Craaft\Tests\Resources;
 
 use Craaft\Enums\Priority;
 use Craaft\Exceptions\ValidationError;
+use Craaft\Models\CardSummary;
+use Craaft\Models\SearchResult;
+use Craaft\Models\UpcomingCard;
 use Craaft\Tests\ClientBuilder;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -123,6 +126,40 @@ final class CardsTest extends TestCase
         $this->assertSame('DELETE', $b->stub()->lastCall()['method']);
     }
 
+    public function testArchive(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['archived' => true, 'id' => 'card1']);
+        $this->assertNull($b->client()->cards->archive('card1'));
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/cards/card1/archive', $call['url']);
+    }
+
+    public function testRestore(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, $this->card());
+        $card = $b->client()->cards->restore('card1');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame(self::BASE . '/cards/card1/restore', $call['url']);
+        $this->assertSame('card1', $card->id);
+    }
+
+    public function testFocusDueUsesUpcomingCardShape(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            'due' => [array_merge($this->summary(), ['dueDate' => '2026-05-05T00:00:00+02:00'])],
+            'attention' => [],
+            'hygiene' => ['ghosts' => 0, 'longInProgress' => 0, 'mineNoDate' => 0],
+        ]);
+        $focus = $b->client()->cards->focus();
+        $this->assertInstanceOf(UpcomingCard::class, $focus->due[0]);
+        $this->assertNotNull($focus->due[0]->dueDate);
+    }
+
     public function testUpcoming(): void
     {
         $b = new ClientBuilder();
@@ -132,6 +169,8 @@ final class CardsTest extends TestCase
             'priority' => 'high',
         ])]);
         $cards = $b->client()->cards->upcoming();
+        $this->assertInstanceOf(UpcomingCard::class, $cards[0]);
+        $this->assertInstanceOf(CardSummary::class, $cards[0]);
         $this->assertSame('Demo', $cards[0]->projectName);
         $this->assertSame('To Do', $cards[0]->columnTitle);
         $this->assertSame('todo', $cards[0]->columnKey);
@@ -145,6 +184,8 @@ final class CardsTest extends TestCase
         $b->stub()->enqueueJson(200, ['cards' => [$this->summary()]]);
         $cards = $b->client()->cards->search(q: 'hello');
         $this->assertCount(1, $cards);
+        $this->assertInstanceOf(SearchResult::class, $cards[0]);
+        $this->assertInstanceOf(CardSummary::class, $cards[0]);
         $this->assertSame('todo', $cards[0]->columnKey);
         $url = $b->stub()->lastCall()['url'];
         $this->assertStringContainsString('q=hello', $url);
@@ -159,18 +200,23 @@ final class CardsTest extends TestCase
         $this->assertStringContainsString('limit=5', $b->stub()->lastCall()['url']);
     }
 
-    public function testSearchLimitValidation(): void
+    public function testSearchLimitBelowOneClampsToTheDefault(): void
     {
-        $c = (new ClientBuilder())->client();
-        $this->expectException(\InvalidArgumentException::class);
-        $c->cards->search(q: 'x', limit: 0);
+        // The server clamps out-of-range limits rather than rejecting them;
+        // earlier versions of this method incorrectly threw here instead of
+        // mirroring that behaviour.
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => []]);
+        $b->client()->cards->search(q: 'x', limit: 0);
+        $this->assertStringContainsString('limit=20', $b->stub()->lastCall()['url']);
     }
 
-    public function testSearchLimitUpperBound(): void
+    public function testSearchLimitAboveFiftyClampsToFifty(): void
     {
-        $c = (new ClientBuilder())->client();
-        $this->expectException(\InvalidArgumentException::class);
-        $c->cards->search(q: 'x', limit: 51);
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['cards' => []]);
+        $b->client()->cards->search(q: 'x', limit: 100);
+        $this->assertStringContainsString('limit=50', $b->stub()->lastCall()['url']);
     }
 
     public function testSearch400RaisesValidation(): void
@@ -393,6 +439,36 @@ final class CardsTest extends TestCase
         $b->stub()->enqueueJson(200, $this->card());
         $b->client()->cards->get('../../admin');
         $this->assertSame(self::BASE . '/cards/..%2F..%2Fadmin', $b->stub()->lastCall()['url']);
+    }
+
+    public function testDetailFetchesTheCardWithItsCollections(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, [
+            'card' => ['title' => 'Detailed'] + $this->card(),
+            'comments' => [[
+                'id' => 'cm1', 'cardId' => 'card1', 'authorId' => 'u1', 'body' => 'hi',
+                'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+            ]],
+            'events' => [[
+                'id' => 'ev1', 'type' => 'moved', 'fromValue' => 'todo', 'toValue' => 'doing',
+                'createdAt' => '2026-05-08T10:00:00Z',
+            ]],
+            'checklist' => [[
+                'id' => 'ck1', 'cardId' => 'card1', 'text' => 't', 'done' => false, 'position' => 1.0,
+                'createdAt' => '2026-05-08T10:00:00Z', 'updatedAt' => '2026-05-08T10:00:00Z',
+            ]],
+            'attachments' => [],
+        ]);
+        $d = $b->client()->cards->detail('card1');
+        $call = $b->stub()->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame(self::BASE . '/cards/card1/detail', $call['url']);
+        $this->assertSame('Detailed', $d->card->title);
+        $this->assertSame('hi', $d->comments[0]->body);
+        $this->assertSame('doing', $d->events[0]->toValue);
+        $this->assertSame('t', $d->checklist[0]->text);
+        $this->assertSame([], $d->attachments);
     }
 
     public function testCardReadsFollowingFlag(): void

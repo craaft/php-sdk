@@ -44,13 +44,19 @@ final class MembersTest extends TestCase
         $b->stub()->enqueueJson(200, [$this->invitation()]);
         $invitations = $b->client()->members->listInvitations();
         $this->assertSame('x@y.co', $invitations[0]->email);
+        // listInvitations() only ever lists pending invitations, so consumed
+        // is always false here (the field is absent from the payload).
+        $this->assertFalse($invitations[0]->consumed);
     }
 
     public function testCreateInvitation(): void
     {
+        // Tolerates a bare invitation object (no {invitation, consumed}
+        // wrapper) - and such a response carries no `consumed` field, so it
+        // defaults to false.
         $b = new ClientBuilder();
         $b->stub()->enqueueJson(201, $this->invitation());
-        $b->client()->members->createInvitation('x@y.co', 'member', boardGrants: [
+        $inv = $b->client()->members->createInvitation('x@y.co', 'member', boardGrants: [
             ['projectId' => 'p1', 'role' => BoardRole::Admin],
         ]);
         $this->assertSame(
@@ -61,6 +67,34 @@ final class MembersTest extends TestCase
             ],
             json_decode($b->stub()->lastCall()['body'], true),
         );
+        $this->assertFalse($inv->consumed);
+    }
+
+    public function testCreateInvitationUnwrapsTheEnvelope(): void
+    {
+        // The server actually wraps the created invitation as
+        // {invitation, consumed}, not a bare Invitation - a real spec bug
+        // that used to leave every field empty.
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, [
+            'invitation' => $this->invitation(),
+            'consumed' => false,
+        ]);
+        $inv = $b->client()->members->createInvitation('x@y.co', 'member');
+        $this->assertSame('inv1', $inv->id);
+        $this->assertSame('x@y.co', $inv->email);
+        $this->assertFalse($inv->consumed);
+    }
+
+    public function testCreateInvitationSurfacesConsumedTrue(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, [
+            'invitation' => $this->invitation(),
+            'consumed' => true,
+        ]);
+        $inv = $b->client()->members->createInvitation('x@y.co', 'member');
+        $this->assertTrue($inv->consumed);
     }
 
     public function testCreateInvitationRejectsBadRole(): void

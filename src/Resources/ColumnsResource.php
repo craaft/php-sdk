@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Craaft\Resources;
 
 use Craaft\Models\Column;
+use Craaft\Models\ColumnArchiveResult;
 use Craaft\Util\Id;
 
 /** Endpoints under /columns. */
@@ -43,9 +44,29 @@ final class ColumnsResource extends BaseResource
         $this->transport->request('DELETE', '/columns/' . Id::segment($columnId));
     }
 
+    /**
+     * Archive every live card in the column, returning the count archived.
+     * Only applies to a column flagged `isDone` - any other column still
+     * answers with `0` rather than an error, so check the count instead of
+     * relying on a non-404 response.
+     *
+     * Use `archiveWithIds()` instead when you need the archived card ids
+     * (e.g. to offer an undo via `CardsResource::restore()`).
+     */
     public function archive(string $columnId): int
     {
         $data = $this->transport->request('POST', '/columns/' . Id::segment($columnId) . '/archive');
         return (int) (is_array($data) ? ($data['archived'] ?? 0) : 0);
+    }
+
+    /**
+     * Archive every live card in the column, same as archive(), but returns
+     * the archived card ids alongside the count so the caller can offer an
+     * undo via `CardsResource::restore()` per id.
+     */
+    public function archiveWithIds(string $columnId): ColumnArchiveResult
+    {
+        $data = $this->transport->request('POST', '/columns/' . Id::segment($columnId) . '/archive');
+        return ColumnArchiveResult::fromApi(is_array($data) ? $data : []);
     }
 }

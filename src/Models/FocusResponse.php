@@ -8,7 +8,7 @@ namespace Craaft\Models;
 readonly class FocusResponse
 {
     /**
-     * @param list<CardSummary>      $due
+     * @param list<UpcomingCard>     $due
      * @param list<AttentionCard>    $attention
      */
     public function __construct(
@@ -23,7 +23,7 @@ readonly class FocusResponse
         $dueRaw = $data['due'] ?? [];
         $attRaw = $data['attention'] ?? [];
         return new self(
-            due: array_map([CardSummary::class, 'fromApi'], is_array($dueRaw) ? $dueRaw : []),
+            due: array_map([UpcomingCard::class, 'fromApi'], is_array($dueRaw) ? $dueRaw : []),
             attention: array_map([AttentionCard::class, 'fromApi'], is_array($attRaw) ? $attRaw : []),
             hygiene: HygieneCounts::fromApi($data['hygiene'] ?? []),
         );

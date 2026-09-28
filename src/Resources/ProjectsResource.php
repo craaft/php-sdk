@@ -6,14 +6,19 @@ namespace Craaft\Resources;
 
 use Craaft\Enums\BoardRole;
 use Craaft\Enums\Visibility;
+use Craaft\Enums\WebhookFormat;
 use Craaft\Exceptions\CraaftError;
+use Craaft\Models\ArchivedCard;
 use Craaft\Models\BoardMember;
 use Craaft\Models\BoardMemberGrant;
+use Craaft\Models\BoardTemplate;
 use Craaft\Models\Card;
 use Craaft\Models\Column;
 use Craaft\Models\Milestone;
 use Craaft\Models\Project;
 use Craaft\Models\ProjectExport;
+use Craaft\Models\WebhookList;
+use Craaft\Models\WebhookSubscription;
 use Craaft\Util\BulkCards;
 use Craaft\Util\Dates;
 use Craaft\Util\Id;
@@ -52,14 +57,35 @@ final class ProjectsResource extends BaseResource
         return Project::fromApi($this->ensureArray($data));
     }
 
-    public function create(string $name, ?string $description = null): Project
+    /**
+     * Create a project. `$template` is a key from `listTemplates()` (e.g.
+     * `'sprint'`, `'bug-tracker'`); omit it (or pass an empty string) for
+     * the default Kanban layout. An unknown key raises ValidationError.
+     */
+    public function create(string $name, ?string $description = null, ?string $template = null): Project
     {
         $body = ['name' => $name];
         if ($description !== null) {
             $body['description'] = $description;
         }
+        if ($template !== null) {
+            $body['template'] = $template;
+        }
         $data = $this->transport->request('POST', '/projects', null, $body);
         return Project::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * List the board templates a new project can start from - the
+     * catalogue behind the `$template` argument of create(). Any
+     * authenticated user; no plan gate.
+     *
+     * @return list<BoardTemplate>
+     */
+    public function listTemplates(): array
+    {
+        $data = $this->transport->request('GET', '/board-templates');
+        return array_map([BoardTemplate::class, 'fromApi'], is_array($data) ? $data : []);
     }
 
     public function update(
@@ -167,6 +193,20 @@ final class ProjectsResource extends BaseResource
     {
         $data = $this->transport->request('GET', '/projects/' . Id::segment($projectId) . '/cards');
         return array_map([Card::class, 'fromApi'], is_array($data) ? $data : []);
+    }
+
+    /**
+     * List a board's archived cards, most recently archived first, capped
+     * at 200. Same board-list shape as listCards() (no description) plus
+     * `archivedAt`. Older archived cards stay reachable through search().
+     * An inaccessible board reads as an empty list.
+     *
+     * @return list<ArchivedCard>
+     */
+    public function listArchivedCards(string $projectId): array
+    {
+        $data = $this->transport->request('GET', '/projects/' . Id::segment($projectId) . '/cards/archived');
+        return array_map([ArchivedCard::class, 'fromApi'], is_array($data) ? $data : []);
     }
 
     public function createCard(
@@ -420,6 +460,54 @@ final class ProjectsResource extends BaseResource
     public function removeMember(string $projectId, string $userId): void
     {
         $this->transport->request('DELETE', '/projects/' . Id::segment($projectId) . '/members/' . Id::segment($userId));
+    }
+
+    /**
+     * List a board's outbound webhook subscriptions plus the catalogue of
+     * broadcast event names for a filter picker. Board-admin only; a Free
+     * board raises PlanLimitError (402).
+     */
+    public function listWebhooks(string $projectId): WebhookList
+    {
+        $data = $this->transport->request('GET', '/projects/' . Id::segment($projectId) . '/webhooks');
+        return WebhookList::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Register a new outbound webhook for the board. Board-admin only, Pro
+     * boards only (Free raises PlanLimitError). `$url` must be absolute
+     * http(s); a literal private, loopback or link-local address is
+     * rejected as a possible SSRF target, and delivery re-checks the
+     * resolved address so DNS cannot route around it.
+     *
+     * `$format` defaults to `craaft`, a signed JSON envelope verified via
+     * the `X-Craaft-Signature` header; `slack` and `discord` POST message
+     * JSON to webhook URLs registered with those services, unsigned.
+     * `$events` filters which broadcast events are delivered - omit it (or
+     * pass an empty array) to subscribe to all of them. Updates and
+     * deletes go through `WebhooksResource` (`$client->webhooks`).
+     *
+     * @param list<string>|null $events
+     */
+    public function createWebhook(
+        string $projectId,
+        string $url,
+        ?string $description = null,
+        ?WebhookFormat $format = null,
+        ?array $events = null,
+    ): WebhookSubscription {
+        $body = ['url' => $url];
+        if ($description !== null) {
+            $body['description'] = $description;
+        }
+        if ($format !== null) {
+            $body['format'] = $format->value;
+        }
+        if ($events !== null) {
+            $body['events'] = array_values($events);
+        }
+        $data = $this->transport->request('POST', '/projects/' . Id::segment($projectId) . '/webhooks', null, $body);
+        return WebhookSubscription::fromApi($this->ensureArray($data));
     }
 
     private function ensureArray(mixed $data): array

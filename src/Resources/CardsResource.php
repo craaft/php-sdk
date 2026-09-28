@@ -8,11 +8,13 @@ use Craaft\Enums\HygieneType;
 use Craaft\Enums\Priority;
 use Craaft\Models\AttentionCard;
 use Craaft\Models\Card;
+use Craaft\Models\CardDetail;
 use Craaft\Models\CardEvent;
-use Craaft\Models\CardSummary;
 use Craaft\Models\ChecklistItem;
 use Craaft\Models\Comment;
 use Craaft\Models\FocusResponse;
+use Craaft\Models\SearchResult;
+use Craaft\Models\UpcomingCard;
 use Craaft\Util\BulkCards;
 use Craaft\Util\Dates;
 use Craaft\Util\Id;
@@ -35,6 +37,18 @@ final class CardsResource extends BaseResource
     {
         $data = $this->transport->request('GET', '/cards/' . Id::segment($cardId));
         return Card::fromApi($this->ensureArray($data));
+    }
+
+    /**
+     * Fetch a card with its comments, activity events, checklist and
+     * attachments in one round-trip (GET /cards/{id}/detail), what the web
+     * app loads when a card modal opens. Prefer it over get() plus four
+     * list calls when rendering a card view.
+     */
+    public function detail(string $cardId): CardDetail
+    {
+        $data = $this->transport->request('GET', '/cards/' . Id::segment($cardId) . '/detail');
+        return CardDetail::fromApi($this->ensureArray($data));
     }
 
     public function update(
@@ -147,11 +161,35 @@ final class CardsResource extends BaseResource
         return Card::fromApi($this->ensureArray($data));
     }
 
-    /** @return list<CardSummary> */
+    /**
+     * Archive a card. It comes off its board but stays searchable and
+     * listed under `ProjectsResource::listArchivedCards()` until restored.
+     *
+     * Not idempotent - archiving an already-archived card raises
+     * NotFoundError, same as archiving one that does not exist or is on a
+     * board you cannot reach.
+     */
+    public function archive(string $cardId): void
+    {
+        $this->transport->request('POST', '/cards/' . Id::segment($cardId) . '/archive');
+    }
+
+    /**
+     * Restore an archived card. It returns to its board, in the column and
+     * position it was archived from. Restoring a card that isn't archived
+     * raises NotFoundError.
+     */
+    public function restore(string $cardId): Card
+    {
+        $data = $this->transport->request('POST', '/cards/' . Id::segment($cardId) . '/restore');
+        return Card::fromApi($this->ensureArray($data));
+    }
+
+    /** @return list<UpcomingCard> */
     public function upcoming(): array
     {
         $data = $this->transport->request('GET', '/cards/upcoming');
-        return array_map([CardSummary::class, 'fromApi'], is_array($data) ? $data : []);
+        return array_map([UpcomingCard::class, 'fromApi'], is_array($data) ? $data : []);
     }
 
     public function focus(): FocusResponse
@@ -191,15 +229,24 @@ final class CardsResource extends BaseResource
         return array_map([CardEvent::class, 'fromApi'], is_array($data) ? $data : []);
     }
 
-    /** @return list<CardSummary> */
+    /**
+     * Cross-project card search.
+     *
+     * `$limit` is clamped exactly as the server does, not validated: a
+     * value below 1 (including the unset default) resolves to 20, and
+     * anything above 50 clamps down to 50 rather than raising - passing
+     * `limit: 100` returns at most 50 rows, not 20. Earlier versions of
+     * this method threw outside 1-50, which enforced the server's old
+     * (pre-clamp) behaviour of silently falling back to 20 above 50.
+     *
+     * @return list<SearchResult>
+     */
     public function search(string $q, int $limit = 20): array
     {
-        if ($limit < 1 || $limit > 50) {
-            throw new \InvalidArgumentException('limit must be between 1 and 50');
-        }
-        $data = $this->transport->request('GET', '/search', ['q' => $q, 'limit' => $limit]);
+        $clamped = $limit < 1 ? 20 : min($limit, 50);
+        $data = $this->transport->request('GET', '/search', ['q' => $q, 'limit' => $clamped]);
         $cards = $this->ensureArray($data)['cards'] ?? [];
-        return array_map([CardSummary::class, 'fromApi'], is_array($cards) ? $cards : []);
+        return array_map([SearchResult::class, 'fromApi'], is_array($cards) ? $cards : []);
     }
 
     /** @return list<Comment> */
