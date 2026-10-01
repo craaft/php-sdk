@@ -26,13 +26,18 @@ final class InboundEmailResource extends BaseResource
     /**
      * Mint the board's inbound address. Raises ConflictError (409) if one
      * already exists - use update() to change it, or disable() then
-     * enable() again for a clean slate.
+     * enable() again for a clean slate. `$aiEnrich` turns AI cards for email
+     * threads on or off; turning it on raises ConflictError (409) when the
+     * server has no AI key.
      */
-    public function enable(string $projectId, ?string $targetColumn = null): InboundAddress
+    public function enable(string $projectId, ?string $targetColumn = null, ?bool $aiEnrich = null): InboundAddress
     {
         $body = [];
         if ($targetColumn !== null) {
             $body['targetColumn'] = $targetColumn;
+        }
+        if ($aiEnrich !== null) {
+            $body['aiEnrich'] = $aiEnrich;
         }
         $data = $this->transport->request(
             'POST',
@@ -47,12 +52,15 @@ final class InboundEmailResource extends BaseResource
      * Partial update - send only the fields to change. `$targetColumn = ''`
      * clears it back to the board's first column; `$rotate = true` mints a
      * new token, so the old address stops accepting mail immediately.
+     * `$aiEnrich` turns AI cards for email threads on or off; turning it on
+     * raises ConflictError (409) when the server has no AI key.
      */
     public function update(
         string $projectId,
         ?bool $active = null,
         ?string $targetColumn = null,
         ?bool $rotate = null,
+        ?bool $aiEnrich = null,
     ): InboundAddress {
         $body = [];
         if ($active !== null) {
@@ -63,6 +71,9 @@ final class InboundEmailResource extends BaseResource
         }
         if ($rotate !== null) {
             $body['rotate'] = $rotate;
+        }
+        if ($aiEnrich !== null) {
+            $body['aiEnrich'] = $aiEnrich;
         }
         $data = $this->transport->request('PATCH', '/projects/' . Id::segment($projectId) . '/inbound-email', null, $body);
         return InboundAddress::fromApi(is_array($data) ? $data : []);

@@ -15,6 +15,7 @@ readonly class InboundAddress
         public string $token,
         public ?string $targetColumn,
         public bool $active,
+        public bool $aiEnrich,
         public DateTimeImmutable $createdAt,
     ) {}
 
@@ -26,6 +27,7 @@ readonly class InboundAddress
             token: (string) $data['token'],
             targetColumn: ($data['targetColumn'] ?? null) === null ? null : (string) $data['targetColumn'],
             active: (bool) ($data['active'] ?? false),
+            aiEnrich: (bool) ($data['aiEnrich'] ?? false),
             createdAt: Dates::parse((string) $data['createdAt']) ?? throw new \InvalidArgumentException('missing createdAt'),
         );
     }

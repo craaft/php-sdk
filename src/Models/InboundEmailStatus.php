@@ -11,6 +11,8 @@ readonly class InboundEmailStatus
         public bool $enabled,
         /** Present only when $enabled is true. */
         public ?InboundAddress $address,
+        /** Whether the server can write AI cards. */
+        public bool $aiAvailable = false,
     ) {}
 
     /** @param array<string, mixed> $data */
@@ -20,6 +22,7 @@ readonly class InboundEmailStatus
         return new self(
             enabled: (bool) ($data['enabled'] ?? false),
             address: is_array($raw) ? InboundAddress::fromApi($raw) : null,
+            aiAvailable: (bool) ($data['aiAvailable'] ?? false),
         );
     }
 }

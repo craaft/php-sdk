@@ -84,6 +84,33 @@ final class InboundEmailTest extends TestCase
         );
     }
 
+    public function testUpdateSendsAiEnrichAndParsesItBack(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, array_merge($this->address(), ['aiEnrich' => true]));
+        $addr = $b->client()->inboundEmail->update('p1', aiEnrich: true);
+        $this->assertSame(['aiEnrich' => true], json_decode($b->stub()->lastCall()['body'], true));
+        $this->assertTrue($addr->aiEnrich);
+    }
+
+    public function testEnableSendsAiEnrich(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(201, array_merge($this->address(), ['aiEnrich' => true]));
+        $addr = $b->client()->inboundEmail->enable('p1', aiEnrich: true);
+        $this->assertSame(['aiEnrich' => true], json_decode($b->stub()->lastCall()['body'], true));
+        $this->assertTrue($addr->aiEnrich);
+    }
+
+    public function testGetParsesAiAvailableAndDefaultsAiEnrichOff(): void
+    {
+        $b = new ClientBuilder();
+        $b->stub()->enqueueJson(200, ['enabled' => true, 'address' => $this->address(), 'aiAvailable' => true]);
+        $status = $b->client()->inboundEmail->get('p1');
+        $this->assertTrue($status->aiAvailable);
+        $this->assertFalse($status->address?->aiEnrich);
+    }
+
     public function testDisable(): void
     {
         $b = new ClientBuilder();
